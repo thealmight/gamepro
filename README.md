@@ -297,6 +297,50 @@ For cloud deployment, you'll need to:
 2. Set up database connection
 3. Build and deploy frontend and backend separately or together
 
+### Deployment to Render
+
+Render is a unified cloud platform that makes it easy to deploy and scale your applications. To deploy Econ Empire to Render:
+
+1. **Create a Render Account**
+   - Go to [render.com](https://render.com) and sign up for an account
+   - Connect your GitHub account to Render
+
+2. **Deploy Using render.yaml**
+   - Fork this repository to your GitHub account
+   - In Render, click "New +" and select "Blueprint"
+   - Connect to your forked repository
+   - Render will automatically detect the `render.yaml` file and configure all services:
+     - A PostgreSQL database service
+     - A web service for the backend API
+     - A static site service for the frontend
+
+3. **Configure Environment Variables**
+   - In the Render dashboard, go to your web service settings
+   - Add the following environment variables:
+     - `JWT_SECRET` - A strong random string for JWT token signing (at least 32 characters)
+     - `FRONTEND_URL` - The URL where your frontend will be hosted (e.g., https://econ-empire-frontend.onrender.com)
+   - You can also reference the `.env.render` file in the repository for guidance on required environment variables
+
+4. **Automatic Database Setup**
+   - Render will automatically create and manage your PostgreSQL database
+   - The database connection details will be automatically provided via the `DATABASE_URL` environment variable
+
+5. **Deploy Services**
+   - Render will automatically build and deploy your services:
+     - The frontend will be deployed as a static site
+     - The backend will be deployed as a web service
+     - The database will be managed by Render
+
+6. **Initialize Database Schema**
+   - After the first deployment, you may need to initialize the database schema
+   - In the Render dashboard, go to your database service and use the "Connect" button to get connection details
+   - Use a PostgreSQL client to connect to your database and run the schema from `database/schema.sql`
+
+7. **Access Your Application**
+   - Once deployment is complete, your application will be available at the provided URLs
+   - The backend API will be accessible at `https://econ-empire-backend.onrender.com`
+   - The frontend will be accessible at `https://econ-empire-frontend.onrender.com`
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

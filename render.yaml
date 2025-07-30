@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: econ-empire-backend
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm run production
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+
+  - type: web
+    name: econ-empire-frontend
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./build
+    envVars:
+      - key: REACT_APP_API_URL
+        sync: false
+      - key: REACT_APP_SOCKET_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /api/
+        destination: https://econ-empire-backend.onrender.com/api/
+
+databases:
+  - name: econ-empire-db
+    plan: starter
