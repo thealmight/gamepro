@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  database:
+    image: postgres:13-alpine
+    container_name: econempire-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: econempire
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - econempire-network
+
+  # Backend API service
+  backend:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    container_name: econempire-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/econempire
+      JWT_SECRET: your-production-jwt-secret-change-in-deployment
+      PORT: 4000
+      NODE_ENV: production
+      FRONTEND_URL: http://localhost:3000
+    env_file:
+      - ../server/.env.production
+    ports:
+      - "4000:4000"
+    depends_on:
+      - database
+    networks:
+      - econempire-network
+
+  # Frontend service
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: econempire-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    env_file:
+      - ../frontend/.env.production
+    networks:
+      - econempire-network
+    depends_on:
+      - backend
+
+# Define named volumes
+volumes:
+  postgres_data:
+
+# Define networks
+networks:
+  econempire-network:
+    driver: bridge
