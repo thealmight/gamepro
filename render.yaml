@@ -5,7 +5,7 @@ services:
     plan: starter
     buildCommand: cd server && npm install
     startCommand: cd server && npm run production
-    nodeVersion: 18.17.1
+    
     envVars:
       - key: NODE_ENV
         value: production
@@ -24,7 +24,7 @@ services:
       npm install
       npm run build
     staticPublishPath: frontend/build
-    nodeVersion: 18.17.1
+ 
     envVars:
       - key: REACT_APP_API_URL
         sync: false
