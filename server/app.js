@@ -20,7 +20,9 @@ app.use(morgan('dev'));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/game', gameRoutes);
-
+app.get('/', (req, res) => {
+  res.send({ message: 'GamePro backend is live!' });
+});
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Econ Empire API is running' });
