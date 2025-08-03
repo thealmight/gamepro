@@ -1,6 +1,9 @@
 {
   "name": "econ-empire-server",
   "version": "1.0.0",
+   "engines": {
+    "node": "18.17.1"},
+    
   "description": "Backend server for Econ Empire multiplayer economic game",
   "main": "server.js",
   "scripts": {
