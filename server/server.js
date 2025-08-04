@@ -243,7 +243,20 @@ server.listen(PORT, () => {
   console.log(`🔌 WebSocket: Socket.IO enabled`);
   console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
 });
+// ...existing code...
+const path = require('path');
 
+// Serve static files from React build
+app.use(express.static(path.join(__dirname, '../frontend/build')));
+
+// API routes
+app.use('/api', apiRouter); // Your API routes
+
+// Catch-all: send index.html for any other route
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
+});
+// ...existing code...
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
