@@ -246,7 +246,7 @@ server.listen(PORT, () => {
 // ...existing code...
 const express = require('express');
 const path = require('path');
-
+const apiRouter = require('./routes/api');
 // Serve static files from React build
 app.use(express.static(path.join(__dirname, '../frontend/build')));
 
