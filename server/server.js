@@ -244,6 +244,7 @@ server.listen(PORT, () => {
   console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
 });
 // ...existing code...
+const express = require('express');
 const path = require('path');
 
 // Serve static files from React build
