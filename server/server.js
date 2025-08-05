@@ -97,14 +97,22 @@ io.on('connection', async (socket) => {
       }
 
       // Save message to database
-      const message = await ChatMessage.create({
-        gameId,
-        senderId: socket.userId,
-        senderCountry: socket.country,
-        messageType,
-        recipientCountry,
-        content: content.trim()
-      });
+     let message;
+try {
+  message = await ChatMessage.create({
+    gameId,
+    senderId: socket.userId,
+    senderCountry: socket.country,
+    messageType,
+    recipientCountry,
+    content: content.trim()
+  });
+} catch (err) {
+  console.error('DB save failed:', err);
+  socket.emit('error', { message: 'Database error' });
+  return;
+}
+
 
       const messageData = {
         id: message.id,
@@ -115,13 +123,15 @@ io.on('connection', async (socket) => {
         content: message.content,
         sentAt: message.sentAt
       };
-
+   console.log('Incoming chat:', data);
       if (messageType === 'group') {
         // Broadcast to all players and operators
+        console.log('Sending message:', messageData)
         io.emit('newMessage', messageData);
       } else if (messageType === 'private' && recipientCountry) {
         // Send to specific country and sender
         io.to(`country_${recipientCountry}`).emit('newMessage', messageData);
+        console.log('Sending message:', messageData)
         socket.emit('newMessage', messageData); // Echo back to sender
       }
 

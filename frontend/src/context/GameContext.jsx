@@ -122,6 +122,9 @@ export const GameProvider = ({ children }) => {
 
     // Handle chat messages
     newSocket.on('newMessage', (message) => {
+      console.log('Received message:', message);
+   
+
       setChatMessages(prev => [...prev, message]);
     });
 
