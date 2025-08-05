@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../context/GameContext';
 import useCountdown from '../hooks/useCountdown';
+// import { socket } from '../socket'; 
+import { io } from 'socket.io-client';
 
 export default function PlayerDashboard() {
   const navigate = useNavigate();
@@ -37,7 +39,7 @@ export default function PlayerDashboard() {
   const [chatType, setChatType] = useState('group');
   const [recipientCountry, setRecipientCountry] = useState('');
   const [playerTariffStatus, setPlayerTariffStatus] = useState(null);
-
+  // const socketIo = require('socket.io');
   // Check authentication
   useEffect(() => {
     if (!authUser) {
@@ -49,6 +51,21 @@ export default function PlayerDashboard() {
       return;
     }
   }, [authUser, navigate]);
+// adjust path if needed
+
+useEffect(() => {
+  socket.on('gameDataUpdated', ({ production, demand, tariffRates }) => {
+    console.log('Received game data update:', { production, demand, tariffRates });
+    // These setters come from your GameContext
+    setProduction(production);
+    setDemand(demand);
+    setTariffRates(tariffRates);
+  });
+
+  return () => {
+    socket.off('gameDataUpdated');
+  };
+}, []);
 
   // Load game data and player status
   useEffect(() => {
@@ -60,6 +77,7 @@ export default function PlayerDashboard() {
 
   // Initialize tariff inputs based on player's production
   useEffect(() => {
+    
     if (production.length > 0 && demand.length > 0) {
       const inputs = {};
       
