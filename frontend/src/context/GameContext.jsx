@@ -29,116 +29,116 @@ export const GameProvider = ({ children }) => {
   // Chat state
   const [chatMessages, setChatMessages] = useState([]);
 
-  // Socket connection
-  const [socket, setSocket] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
+// Socket connection
+const [socket, setSocket] = useState(null);
+const [isConnected, setIsConnected] = useState(false);
 
-  // Initialize user from localStorage
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-    
-    if (token && userData) {
-      try {
-        const user = JSON.parse(userData);
-        setAuthUser(user);
-        initializeSocket(token);
-      } catch (error) {
-        console.error('Error parsing user data:', error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-      }
+// Initialize user from localStorage and socket connection
+useEffect(() => {
+  const token = localStorage.getItem('token');
+  const userData = localStorage.getItem('user');
+  
+  if (token && userData) {
+    try {
+      const user = JSON.parse(userData);
+      setAuthUser(user);
+
+      // Initialize Socket.IO connection
+      const newSocket = io(process.env.REACT_APP_SOCKET_URL, {
+        auth: { token },
+        withCredentials: true,
+        autoConnect: true,
+        transports: ['websocket'],
+      });
+
+      newSocket.on('connect', () => {
+        console.log('✅ Connected to server:', newSocket.id);
+        setIsConnected(true);
+      });
+
+      newSocket.on('disconnect', (reason) => {
+        console.log('⚠️ Disconnected:', reason);
+        setIsConnected(false);
+      });
+
+      newSocket.on('connect_error', (err) => {
+        console.error('❌ Connection error:', err.message);
+      });
+
+      // Handle online users updates
+      newSocket.on('onlineUsers', (users) => {
+        setOnlineUsers(users);
+      });
+
+      newSocket.on('userStatusUpdate', (update) => {
+        setOnlineUsers(prev => {
+          const filtered = prev.filter(user => user.id !== update.userId);
+          if (update.isOnline) {
+            return [...filtered, update];
+          }
+          return filtered;
+        });
+      });
+
+      // Handle game state updates
+      newSocket.on('gameStateChanged', (data) => {
+        if (data.gameId) setGameId(data.gameId);
+        if (data.currentRound !== undefined) setCurrentRound(data.currentRound);
+        if (data.status) setGameStatus(data.status);
+        if (data.totalRounds) setRounds(data.totalRounds);
+        if (data.isEnded !== undefined) setGameEnded(data.isEnded);
+      });
+
+      // Handle round timer updates
+      newSocket.on('roundTimerUpdated', (data) => {
+        setTimeLeft(data.timeRemaining);
+        setCurrentRound(data.currentRound);
+      });
+
+      // Handle tariff updates
+      newSocket.on('tariffUpdated', (data) => {
+        setTariffRates(prev => {
+          const filtered = prev.filter(t => 
+            !(t.product === data.product && 
+              t.fromCountry === data.fromCountry && 
+              t.toCountry === data.toCountry &&
+              t.roundNumber === data.roundNumber)
+          );
+          return [...filtered, data];
+        });
+
+        setTariffHistory(prev => [...prev, {
+          round: data.roundNumber,
+          player: data.updatedBy,
+          country: data.fromCountry,
+          tariffs: { [data.product]: data.rate },
+          submittedAt: data.updatedAt
+        }]);
+      });
+
+      // Handle chat messages
+      newSocket.on('newMessage', (message) => {
+        console.log('Received message:', message);
+        setChatMessages(prev => [...prev, message]);
+      });
+
+      // Handle errors
+      newSocket.on('error', (error) => {
+        console.error('Socket error:', error);
+      });
+
+      setSocket(newSocket);
+
+      return () => {
+        newSocket.disconnect();
+      };
+    } catch (error) {
+      console.error('Error parsing user data:', error);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
     }
-  }, []);
-
-  // Initialize Socket.IO connection
-  const initializeSocket = (token) => {
-    const newSocket = io(config.SOCKET_URL || '/', {
-      auth: { token }
-    });
-
-    newSocket.on('connect', () => {
-      console.log('Connected to server');
-      setIsConnected(true);
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
-      setIsConnected(false);
-    });
-
-    // Handle online users updates
-    newSocket.on('onlineUsers', (users) => {
-      setOnlineUsers(users);
-    });
-
-    newSocket.on('userStatusUpdate', (update) => {
-      setOnlineUsers(prev => {
-        const filtered = prev.filter(user => user.id !== update.userId);
-        if (update.isOnline) {
-          return [...filtered, update];
-        }
-        return filtered;
-      });
-    });
-
-    // Handle game state updates
-    newSocket.on('gameStateChanged', (data) => {
-      if (data.gameId) setGameId(data.gameId);
-      if (data.currentRound !== undefined) setCurrentRound(data.currentRound);
-      if (data.status) setGameStatus(data.status);
-      if (data.totalRounds) setRounds(data.totalRounds);
-      if (data.isEnded !== undefined) setGameEnded(data.isEnded);
-    });
-
-    // Handle round timer updates
-    newSocket.on('roundTimerUpdated', (data) => {
-      setTimeLeft(data.timeRemaining);
-      setCurrentRound(data.currentRound);
-    });
-
-    // Handle tariff updates
-    newSocket.on('tariffUpdated', (data) => {
-      // Update tariff rates in real-time
-      setTariffRates(prev => {
-        const filtered = prev.filter(t => 
-          !(t.product === data.product && 
-            t.fromCountry === data.fromCountry && 
-            t.toCountry === data.toCountry &&
-            t.roundNumber === data.roundNumber)
-        );
-        return [...filtered, data];
-      });
-
-      // Add to history
-      setTariffHistory(prev => [...prev, {
-        round: data.roundNumber,
-        player: data.updatedBy,
-        country: data.fromCountry,
-        tariffs: { [data.product]: data.rate },
-        submittedAt: data.updatedAt
-      }]);
-    });
-
-    // Handle chat messages
-    newSocket.on('newMessage', (message) => {
-      console.log('Received message:', message);
-   
-
-      setChatMessages(prev => [...prev, message]);
-    });
-
-    // Handle errors
-    newSocket.on('error', (error) => {
-      console.error('Socket error:', error);
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.disconnect();
-    };
-  };
+  }
+}, []);
 
   // API helper function
   const apiCall = async (endpoint, options = {}) => {

@@ -4,21 +4,22 @@ const useCountdown = (timeLeft, setTimeLeft, isActive) => {
   const intervalRef = useRef(null);
 
   useEffect(() => {
-    if (isActive && timeLeft > 0) {
+    if (isActive && intervalRef.current === null) {
       intervalRef.current = setInterval(() => {
         setTimeLeft(prevTime => {
           if (prevTime <= 1) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
             return 0;
           }
           return prevTime - 1;
-          
         });
       }, 1000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+    }
+
+    if (!isActive && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
 
     return () => {
@@ -27,16 +28,7 @@ const useCountdown = (timeLeft, setTimeLeft, isActive) => {
         intervalRef.current = null;
       }
     };
-  }, [isActive, timeLeft, setTimeLeft]);
-
-  // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, []);
+  }, [isActive, setTimeLeft]);
 };
 
 export default useCountdown;

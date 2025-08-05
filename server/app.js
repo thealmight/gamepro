@@ -19,6 +19,7 @@ app.options('*', cors()); // Handle preflight requests
 
 app.use(express.json());
 app.use(morgan('dev'));
+app.use('/api', require('./routes/test'));
 
 // Routes
 app.use('/api/auth', authRoutes);
