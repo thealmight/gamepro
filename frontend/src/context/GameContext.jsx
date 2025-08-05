@@ -164,7 +164,7 @@ export const GameProvider = ({ children }) => {
   // Create new game (operator only)
   const createGame = async (totalRounds = 5) => {
     try {
-      const data = await apiCall('/game/create', {
+      const data = await apiCall('api/game/create', {
         method: 'POST',
         body: JSON.stringify({ totalRounds })
       });
