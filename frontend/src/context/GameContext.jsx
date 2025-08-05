@@ -395,10 +395,13 @@ export const GameProvider = ({ children }) => {
     // Game data
     countries,
     products,
-    production,
-    demand,
-    tariffRates,
+    production,setProduction,
+    demand,setDemand,
+    tariffRates,setTariffRates,
     tariffHistory,
+
+
+
 
     // Chat
     chatMessages,

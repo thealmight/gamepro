@@ -11,6 +11,7 @@ const useCountdown = (timeLeft, setTimeLeft, isActive) => {
             return 0;
           }
           return prevTime - 1;
+          
         });
       }, 1000);
     } else {

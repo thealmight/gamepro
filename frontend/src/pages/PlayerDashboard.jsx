@@ -28,7 +28,10 @@ export default function PlayerDashboard() {
     loadGameData,
     sendChatMessage,
     logout,
-    apiCall
+    apiCall,  setProduction,
+  setDemand,
+  setTariffRates
+
   } = useGame();
 
   const [tariffInputs, setTariffInputs] = useState({});
