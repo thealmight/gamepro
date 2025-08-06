@@ -17,9 +17,13 @@ const User = sequelize.define('User', {
     field: 'password_hash'
   },
   role: {
-    type: DataTypes.ENUM('operator', 'player'),
-    allowNull: false,
-  },
+  type: DataTypes.STRING,
+  allowNull: false,
+  validate: {
+    isIn: [['operator', 'player']]
+  }
+},
+
   country: {
     type: DataTypes.STRING(50),
     allowNull: true,

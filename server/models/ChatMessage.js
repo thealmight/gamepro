@@ -31,10 +31,13 @@ const ChatMessage = sequelize.define('ChatMessage', {
     field: 'sender_country'
   },
   messageType: {
-    type: DataTypes.ENUM('group', 'private'),
-    defaultValue: 'group',
-    field: 'message_type'
+  type: DataTypes.STRING,
+  defaultValue: 'group',
+  field: 'message_type',
+  validate: {
+    isIn: [['group', 'private']]
   },
+},
   recipientCountry: {
     type: DataTypes.STRING(50),
     allowNull: true,

@@ -34,10 +34,14 @@ const GameRound = sequelize.define('GameRound', {
     defaultValue: 900,
     field: 'time_remaining'
   },
-  status: {
-    type: DataTypes.ENUM('pending', 'active', 'completed'),
-    defaultValue: 'pending'
+ status: {
+  type: DataTypes.STRING,
+  defaultValue: 'pending',
+  validate: {
+    isIn: [['pending', 'active', 'completed']]
   }
+}
+
 }, {
   tableName: 'game_rounds',
   timestamps: false,

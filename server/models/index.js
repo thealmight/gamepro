@@ -43,9 +43,16 @@ const syncDatabase = async () => {
   try {
     await sequelize.sync({ alter: true }); // Use alter: true for development
     console.log('Database synchronized successfully.');
-  } catch (error) {
-    console.error('Error synchronizing database:', error);
+  }catch (error) {
+  console.error('Error synchronizing database:', error);
+  if (error.original) {
+    console.error('Sequelize original error:', error.original);
   }
+  if (error.errors) {
+    console.error('Sequelize errors array:', error.errors);
+  }
+}
+
 };
 
 module.exports = {

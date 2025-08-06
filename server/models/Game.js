@@ -23,10 +23,14 @@ const Game = sequelize.define('Game', {
     defaultValue: 900, // 15 minutes in seconds
     field: 'round_duration'
   },
-  status: {
-    type: DataTypes.ENUM('waiting', 'active', 'paused', 'ended'),
-    defaultValue: 'waiting'
-  },
+status: {
+  type: DataTypes.STRING,
+  defaultValue: 'waiting',
+  validate: {
+    isIn: [['waiting', 'active', 'paused', 'ended']]
+  }
+},
+
   operatorId: {
     type: DataTypes.INTEGER,
     field: 'operator_id',
