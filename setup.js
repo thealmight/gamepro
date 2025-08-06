@@ -8,7 +8,7 @@ console.log('🚀 Econ Empire Setup Script');
 console.log('============================\n');
 
 // Check if we're in WebContainer environment
-const isWebContainer = process.env.SHELL && process.env.SHELL.includes('zsh') && !fs.existsSync('/usr/bin/psql');
+const isWebContainer = !fs.existsSync('/usr/bin/psql') && !fs.existsSync('/usr/local/bin/psql') && process.env.NODE_ENV !== 'production';
 
 if (isWebContainer) {
   console.log('📦 WebContainer environment detected');
