@@ -176,7 +176,7 @@ useEffect(() => {
   return () => {
     if (newSocket) newSocket.disconnect(); // ✅ Safe cleanup
   };
-}, [loadGameData]);
+}, []);
 
   // Create new game (operator only)
   const createGame = async (totalRounds = 5) => {
