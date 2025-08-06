@@ -83,10 +83,13 @@ useEffect(() => {
       const newSocket = io(process.env.REACT_APP_SOCKET_URL, {
         auth: { token },
         withCredentials: true,
-        autoConnect: true,
+        autoConnect: false,
         transports: ['websocket'],
+        reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
       });
-
+      newSocket.connect();
       newSocket.on('connect', () => {
         console.log('✅ Connected to server:', newSocket.id);
         setIsConnected(true);
