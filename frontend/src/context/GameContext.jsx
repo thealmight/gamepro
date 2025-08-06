@@ -191,7 +191,7 @@ useEffect(() => {
       localStorage.removeItem('user');
     }
   }
-}, [loadGameData]);
+}, []);
 
   // Create new game (operator only)
   const createGame = async (totalRounds = 5) => {
