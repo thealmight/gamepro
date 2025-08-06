@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../context/GameContext';
 import useCountdown from '../hooks/useCountdown';
-
-
 import { io } from 'socket.io-client';
 
 export default function PlayerDashboard() {
@@ -45,7 +43,7 @@ export default function PlayerDashboard() {
   const [chatType, setChatType] = useState('group');
   const [recipientCountry, setRecipientCountry] = useState('');
   const [playerTariffStatus, setPlayerTariffStatus] = useState(null);
-  const socketIo = require('socket.io');
+  // const socketIo = require('socket.io');
   // Check authentication
   useEffect(() => {
     if (!authUser) {

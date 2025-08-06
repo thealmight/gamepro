@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../context/GameContext';
 import useCountdown from '../hooks/useCountdown';
+import { io } from 'socket.io-client';
 
 export default function OperatorDashboard() {
   const navigate = useNavigate();
