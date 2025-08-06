@@ -143,6 +143,13 @@ useEffect(() => {
         console.error('Socket error:', error);
       });
 
+      // Handle country-specific game data updates
+      newSocket.on('gameDataUpdated', (data) => {
+        if (data.production) setProduction(data.production);
+        if (data.demand) setDemand(data.demand);
+        if (data.tariffRates) setTariffRates(data.tariffRates);
+      });
+
       setSocket(newSocket);
 
       return () => {
@@ -153,7 +160,7 @@ useEffect(() => {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
     }
-  }
+  }, [loadGameData]); // Add loadGameData to dependency array
 }, []);
 
   // API helper function
