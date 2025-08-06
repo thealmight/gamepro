@@ -4,7 +4,7 @@ import { useGame } from '../context/GameContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { setAuthUser } = useGame();
+  const { socket, isConnected,setAuthUser } = useGame();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);

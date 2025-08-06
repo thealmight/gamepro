@@ -6,6 +6,8 @@ import useCountdown from '../hooks/useCountdown';
 export default function OperatorDashboard() {
   const navigate = useNavigate();
   const {
+    socket,
+     isConnected,
     authUser,
     gameId,
     rounds,
