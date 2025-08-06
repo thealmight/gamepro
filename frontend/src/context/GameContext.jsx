@@ -67,30 +67,7 @@ useEffect(() => {
   const userData = localStorage.getItem('user');
   const savedGameId = localStorage.getItem('gameId');
   const savedCurrentRound = localStorage.getItem('currentRound');
-const loadGameData = useCallback(async () => {
-    if (!gameId) return;
 
-    try {
-      let data;
-      if (authUser?.role === 'operator') {
-        data = await apiCall(`/game/${gameId}`);
-        setProduction(data.game.production || []);
-        setDemand(data.game.demand || []);
-        setTariffRates(data.game.tariffRates || []);
-      } else {
-        data = await apiCall(`/game/${gameId}/player-data?currentRound=${currentRound}`);
-        setProduction(data.production || []);
-        setDemand(data.demand || []);
-        setTariffRates(data.tariffRates || []);
-      }
-
-         setCurrentRound(parseInt(localStorage.getItem('currentRound')) || 0);
-
-
-    } catch (error) {
-      console.error('Load game data error:', error);
-    }
-  }, [gameId, currentRound, authUser, apiCall]);
   let newSocket; // ✅ Declare in outer scope
 
   if (token && userData) {
@@ -221,6 +198,30 @@ const loadGameData = useCallback(async () => {
       throw error;
     }
   };
+const loadGameData = useCallback(async () => {
+  if (!gameId) return;
+
+  try {
+    const round = parseInt(localStorage.getItem('currentRound')) || 0;
+    setCurrentRound(round);
+
+    let data;
+    if (authUser?.role === 'operator') {
+      data = await apiCall(`/game/${gameId}`);
+      setProduction(data.game.production || []);
+      setDemand(data.game.demand || []);
+      setTariffRates(data.game.tariffRates || []);
+    } else {
+      data = await apiCall(`/game/${gameId}/player-data?currentRound=${round}`);
+      setProduction(data.production || []);
+      setDemand(data.demand || []);
+      setTariffRates(data.tariffRates || []);
+    }
+
+  } catch (error) {
+    console.error('Load game data error:', error);
+  }
+}, [gameId, authUser, apiCall]); // removed currentRound from deps
 
   // Start game (operator only)
   const startGame = async () => {
