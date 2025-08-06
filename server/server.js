@@ -18,7 +18,7 @@ const io = socketIo(server, {
     credentials: true
   }
 });
-server.listen(PORT, () => console.log(`Server running on ${PORT}`));
+// server.listen(PORT, () => console.log(`Server running on ${PORT}`));
 // Socket.IO authentication middleware
 io.use(async (socket, next) => {
   try {
