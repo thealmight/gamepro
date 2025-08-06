@@ -29,6 +29,34 @@ export const GameProvider = ({ children }) => {
   // Chat state
   const [chatMessages, setChatMessages] = useState([]);
 
+    // API helper function
+    const apiCall = useCallback(async (endpoint, options = {}) => {
+      const token = localStorage.getItem('token');
+      const defaultOptions = {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` })
+        }
+      };
+
+      const response = await fetch(`${config.API_BASE_URL}/api${endpoint}`, {
+        ...defaultOptions,
+        ...options,
+        headers: { ...defaultOptions.headers, ...options.headers }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'API request failed');
+      }
+
+      return response.json();
+    }, []);
+
+
+
+
+
 // Socket connection
 const [socket, setSocket] = useState(null);
 const [isConnected, setIsConnected] = useState(false);
@@ -39,7 +67,7 @@ useEffect(() => {
   const userData = localStorage.getItem('user');
   const savedGameId = localStorage.getItem('gameId');
   const savedCurrentRound = localStorage.getItem('currentRound');
-  
+
   if (token && userData) {
     try {
       const user = JSON.parse(userData);
@@ -48,7 +76,6 @@ useEffect(() => {
       // Restore game state if available
       if (savedGameId) {
         setGameId(savedGameId);
-        setCurrentRound(parseInt(savedCurrentRound) || 0);
         loadGameData(); // Load game data immediately when restoring state
       }
 
@@ -161,32 +188,7 @@ useEffect(() => {
       localStorage.removeItem('user');
     }
   }
-  // Add loadGameData to dependency array
 }, [loadGameData]);
-
-  // API helper function
-  const apiCall = useCallback(async (endpoint, options = {}) => {
-    const token = localStorage.getItem('token');
-    const defaultOptions = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` })
-      }
-    };
-
-    const response = await fetch(`${config.API_BASE_URL}/api${endpoint}`, {
-      ...defaultOptions,
-      ...options,
-      headers: { ...defaultOptions.headers, ...options.headers }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'API request failed');
-    }
-
-    return response.json();
-  }, []);
 
   // Create new game (operator only)
   const createGame = async (totalRounds = 5) => {
@@ -331,6 +333,7 @@ useEffect(() => {
     }
   };
 
+
   // Load game data
   const loadGameData = useCallback(async () => {
     if (!gameId) return;
@@ -348,6 +351,10 @@ useEffect(() => {
         setDemand(data.demand || []);
         setTariffRates(data.tariffRates || []);
       }
+
+         setCurrentRound(parseInt(localStorage.getItem('currentRound')) || 0);
+
+
     } catch (error) {
       console.error('Load game data error:', error);
     }
