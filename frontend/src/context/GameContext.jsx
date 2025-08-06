@@ -37,11 +37,20 @@ const [isConnected, setIsConnected] = useState(false);
 useEffect(() => {
   const token = localStorage.getItem('token');
   const userData = localStorage.getItem('user');
+  const savedGameId = localStorage.getItem('gameId');
+  const savedCurrentRound = localStorage.getItem('currentRound');
   
   if (token && userData) {
     try {
       const user = JSON.parse(userData);
       setAuthUser(user);
+
+      // Restore game state if available
+      if (savedGameId) {
+        setGameId(savedGameId);
+        setCurrentRound(parseInt(savedCurrentRound) || 0);
+        loadGameData(); // Load game data immediately when restoring state
+      }
 
       // Initialize Socket.IO connection
       const newSocket = io(process.env.REACT_APP_SOCKET_URL, {
@@ -82,8 +91,14 @@ useEffect(() => {
 
       // Handle game state updates
       newSocket.on('gameStateChanged', (data) => {
-        if (data.gameId) setGameId(data.gameId);
-        if (data.currentRound !== undefined) setCurrentRound(data.currentRound);
+        if (data.gameId) {
+          setGameId(data.gameId);
+          localStorage.setItem('gameId', data.gameId);
+        }
+        if (data.currentRound !== undefined) {
+          setCurrentRound(data.currentRound);
+          localStorage.setItem('currentRound', data.currentRound);
+        }
         if (data.status) setGameStatus(data.status);
         if (data.totalRounds) setRounds(data.totalRounds);
         if (data.isEnded !== undefined) setGameEnded(data.isEnded);
@@ -93,6 +108,7 @@ useEffect(() => {
       newSocket.on('roundTimerUpdated', (data) => {
         setTimeLeft(data.timeRemaining);
         setCurrentRound(data.currentRound);
+        localStorage.setItem('currentRound', data.currentRound);
       });
 
       // Handle tariff updates
@@ -350,6 +366,8 @@ useEffect(() => {
     } finally {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      localStorage.removeItem('gameId');
+      localStorage.removeItem('currentRound');
       if (socket) {
         socket.disconnect();
       }

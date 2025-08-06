@@ -61,17 +61,17 @@ export default function LoginPage() {
     }
   };
 
-  const handleQuickLogin = (userType) => {
-    if (userType === 'operator') {
-      setUsername('pavan');
-    } else {
-      // For demo, allow any username for players
-      const playerNames = ['player1', 'player2', 'player3', 'player4', 'player5'];
-      const randomPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
-      setUsername(randomPlayer);
-    }
-    setPassword('');
-  };
+const handleQuickLogin = (userType) => {
+  if (userType === 'operator') {
+    setUsername('pavan');
+  } else {
+    const playerNames = ['player1', 'player2', 'player3', 'player4', 'player5'];
+    const randomPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+    setUsername(randomPlayer);
+  }
+  setPassword('');
+};
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900">
