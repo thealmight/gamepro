@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import config from '../config';
 
@@ -160,11 +160,12 @@ useEffect(() => {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
     }
-  }, [loadGameData]); // Add loadGameData to dependency array
-}, []);
+  }
+  // Add loadGameData to dependency array
+}, [loadGameData]);
 
   // API helper function
-  const apiCall = async (endpoint, options = {}) => {
+  const apiCall = useCallback(async (endpoint, options = {}) => {
     const token = localStorage.getItem('token');
     const defaultOptions = {
       headers: {
@@ -185,7 +186,7 @@ useEffect(() => {
     }
 
     return response.json();
-  };
+  }, []);
 
   // Create new game (operator only)
   const createGame = async (totalRounds = 5) => {
@@ -331,7 +332,7 @@ useEffect(() => {
   };
 
   // Load game data
-  const loadGameData = async () => {
+  const loadGameData = useCallback(async () => {
     if (!gameId) return;
 
     try {
@@ -350,7 +351,7 @@ useEffect(() => {
     } catch (error) {
       console.error('Load game data error:', error);
     }
-  };
+  }, [gameId, currentRound, authUser, apiCall]);
 
   // Send chat message
   const sendChatMessage = (content, messageType = 'group', recipientCountry = null) => {

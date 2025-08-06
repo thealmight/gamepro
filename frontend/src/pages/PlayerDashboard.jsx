@@ -68,7 +68,7 @@ useEffect(() => {
   return () => {
     socket.off('gameDataUpdated');
   };
-}, []);
+}, [setProduction, setDemand, setTariffRates]);
 
   // Load game data and player status
   useEffect(() => {
@@ -323,77 +323,77 @@ useEffect(() => {
         </div>
 
         {/* Tariff Management */}
-        {gameStatus === 'active' && !isGameEnded && currentRound > 0 && playerProduction.length > 0 && (
-          <div className="bg-white p-6 rounded-lg shadow mb-6">
-            <h2 className="text-xl font-semibold mb-4">Manage Tariff Rates (Round {currentRound})</h2>
-            
-            {timeLeft === 0 ? (
-              <div className="p-4 bg-red-50 border border-red-200 rounded mb-4">
-                <p className="text-red-800 font-medium">
-                  Time's up! Tariff submissions are closed for this round.
-                </p>
-              </div>
-            ) : (
-              <>
-                <p className="text-gray-600 mb-4">
-                  Set tariff rates for products your country produces. Rates must be between 0-100%.
-                </p>
+{gameStatus === 'active' && !isGameEnded && currentRound > 0 && playerProduction.length > 0 && (
+  <div className="bg-white p-6 rounded-lg shadow mb-6">
+    <h2 className="text-xl font-semibold mb-4">Manage Tariff Rates (Round {currentRound})</h2>
+    
+    {timeLeft === 0 ? (
+      <div className="p-4 bg-red-50 border border-red-200 rounded mb-4">
+        <p className="text-red-800 font-medium">
+          Time's up! Tariff submissions are closed for this round.
+        </p>
+      </div>
+    ) : (
+      <>
+        <p className="text-gray-600 mb-4">
+          Set tariff rates for products your country produces. Rates must be between 0-100%.
+        </p>
 
-                <div className="space-y-4 mb-6">
-                  {playerProduction.map(prod => {
-                    // Find countries that demand this product
-                    const demandingCountries = demand
-                      .filter(d => d.product === prod.product && d.country !== playerCountry)
-                      .map(d => d.country);
+        <div className="space-y-4 mb-6">
+          {playerProduction.map(prod => {
+            // Find countries that demand this product
+            const demandingCountries = demand
+              .filter(d => d.product === prod.product && d.country !== playerCountry)
+              .map(d => d.country);
 
-                    if (demandingCountries.length === 0) return null;
+            if (demandingCountries.length === 0) return null;
 
+            return (
+              <div key={prod.product} className="border rounded-lg p-4">
+                <h3 className="font-medium text-lg mb-3">{prod.product} (You produce {prod.quantity} units)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {demandingCountries.map(country => {
+                    const key = `${prod.product}-${country}`;
+                    const demandQuantity = demand.find(d => d.product === prod.product && d.country === country)?.quantity;
+                    
                     return (
-                      <div key={prod.product} className="border rounded-lg p-4">
-                        <h3 className="font-medium text-lg mb-3">{prod.product} (You produce {prod.quantity} units)</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {demandingCountries.map(country => {
-                            const key = `${prod.product}-${country}`;
-                            const demandQuantity = demand.find(d => d.product === prod.product && d.country === country)?.quantity;
-                            
-                            return (
-                              <div key={country} className="border rounded p-3">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  To {country} (demands {demandQuantity} units)
-                                </label>
-                                <div className="flex items-center">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="100"
-                                    step="0.1"
-                                    value={tariffInputs[key] || ''}
-                                    onChange={(e) => handleTariffInputChange(key, e.target.value)}
-                                    className="w-full p-2 border rounded"
-                                    placeholder="0-100"
-                                  />
-                                  <span className="ml-2 text-gray-500">%</span>
-                                </div>
-                              </div>
-                            );
-                          })}
+                      <div key={country} className="border rounded p-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          To {country} (demands {demandQuantity} units)
+                        </label>
+                        <div className="flex items-center">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={tariffInputs[key] || ''}
+                            onChange={(e) => handleTariffInputChange(key, e.target.value)}
+                            className="w-full p-2 border rounded"
+                            placeholder="0-100"
+                          />
+                          <span className="ml-2 text-gray-500">%</span>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+              </div>
+            );
+          })}
+        </div>
 
-                <button
-                  onClick={handleSubmitTariffs}
-                  disabled={loading || timeLeft === 0}
-                  className="bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Submitting...' : `Submit Tariffs for Round ${currentRound}`}
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        <button
+          onClick={handleSubmitTariffs}
+          disabled={loading || timeLeft === 0}
+          className="bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? 'Submitting...' : `Submit Tariffs for Round ${currentRound}`}
+        </button>
+      </>
+    )}
+  </div>
+)}
 
         {/* Current Tariff Rates */}
         {playerDemand.length > 0 && (
