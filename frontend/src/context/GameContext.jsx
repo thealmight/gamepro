@@ -11,8 +11,8 @@ export const GameProvider = ({ children }) => {
   const [currentRound, setCurrentRound] = useState(0);
   const [isRoundsFinalized, setRoundsFinalized] = useState(false);
   const [isGameEnded, setGameEnded] = useState(false);
-  const [gameStatus, setGameStatus] = useState('waiting');
-  const [timeLeft, setTimeLeft] = useState(900);
+  const [gameStatus, setGameStatus] = useState('waiting'); // waiting, active, paused, ended
+  const [timeLeft, setTimeLeft] = useState(900); // 15 minutes in seconds
 
   // User state
   const [authUser, setAuthUser] = useState(null);
@@ -29,186 +29,166 @@ export const GameProvider = ({ children }) => {
   // Chat state
   const [chatMessages, setChatMessages] = useState([]);
 
-  // Socket state
-  const [socket, setSocket] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
-
-  // ---- API Helper ----
-  const apiCall = useCallback(async (endpoint, options = {}) => {
-    const token = localStorage.getItem('token');
-    const defaultOptions = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` })
-      }
-    };
-    const response = await fetch(`${config.API_BASE_URL}/api${endpoint}`, {
-      ...defaultOptions,
-      ...options,
-      headers: { ...defaultOptions.headers, ...options.headers }
-    });
-    let data;
-    try {
-      data = await response.json();
-    } catch {
-      throw new Error('API request failed');
-    }
-    if (!response.ok) {
-      throw new Error(data.error || 'API request failed');
-    }
-    return data;
-  }, []);
-
-  // ---- Load Game Data ----
-  const loadGameData = useCallback(async () => {
-    if (!gameId) return;
-    try {
-      const round = parseInt(localStorage.getItem('currentRound')) || 0;
-      setCurrentRound(round);
-
-      let data;
-      if (authUser?.role === 'operator') {
-        data = await apiCall(`/game/${gameId}`);
-        setProduction(data.game.production || []);
-        setDemand(data.game.demand || []);
-        setTariffRates(data.game.tariffRates || []);
-      } else {
-        data = await apiCall(`/game/${gameId}/player-data?currentRound=${round}`);
-        setProduction(data.production || []);
-        setDemand(data.demand || []);
-        setTariffRates(data.tariffRates || []);
-      }
-    } catch (error) {
-      console.error('Load game data error:', error);
-    }
-  }, [gameId, authUser, apiCall]);
-
-  // ---- Initialize user and socket ----
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-    const savedGameId = localStorage.getItem('gameId');
-    const savedCurrentRound = localStorage.getItem('currentRound');
-
-    if (token && userData) {
-      try {
-        const user = JSON.parse(userData);
-        setAuthUser(user);
-
-        if (savedGameId) {
-          setGameId(savedGameId);
-          loadGameData();
+    // API helper function
+    const apiCall = useCallback(async (endpoint, options = {}) => {
+      const token = localStorage.getItem('token');
+      const defaultOptions = {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` })
         }
+      };
 
-        // Only create socket if it doesn't exist yet!
-        if (!socket) {
-          const newSocket = io(process.env.REACT_APP_SOCKET_URL, {
-            auth: { token },
-            withCredentials: true,
-            autoConnect: true,
-            transports: ['websocket'],
-          });
+      const response = await fetch(`${config.API_BASE_URL}/api${endpoint}`, {
+        ...defaultOptions,
+        ...options,
+        headers: { ...defaultOptions.headers, ...options.headers }
+      });
 
-          setSocket(newSocket);
-
-          // Setup all socket listeners
-          newSocket.on('connect', () => {
-            console.log('✅ Connected to server:', newSocket.id);
-            setIsConnected(true);
-          });
-
-          newSocket.on('disconnect', (reason) => {
-            console.log('⚠️ Disconnected:', reason);
-            setIsConnected(false);
-          });
-
-          newSocket.on('connect_error', (err) => {
-            console.error('❌ Connection error:', err.message);
-          });
-
-          newSocket.on('onlineUsers', setOnlineUsers);
-
-          newSocket.on('userStatusUpdate', (update) => {
-            setOnlineUsers(prev => {
-              const filtered = prev.filter(user => user.id !== update.userId);
-              return update.isOnline ? [...filtered, update] : filtered;
-            });
-          });
-
-          newSocket.on('gameStateChanged', (data) => {
-            if (data.gameId) {
-              setGameId(data.gameId);
-              localStorage.setItem('gameId', data.gameId);
-            }
-            if (data.currentRound !== undefined) {
-              setCurrentRound(data.currentRound);
-              localStorage.setItem('currentRound', data.currentRound);
-            }
-            if (data.status) setGameStatus(data.status);
-            if (data.totalRounds) setRounds(data.totalRounds);
-            if (data.isEnded !== undefined) setGameEnded(data.isEnded);
-          });
-
-          newSocket.on('roundTimerUpdated', (data) => {
-            setTimeLeft(data.timeRemaining);
-            setCurrentRound(data.currentRound);
-            localStorage.setItem('currentRound', data.currentRound);
-          });
-
-          newSocket.on('tariffUpdated', (data) => {
-            setTariffRates(prev => {
-              const filtered = prev.filter(t => 
-                !(t.product === data.product && 
-                  t.fromCountry === data.fromCountry && 
-                  t.toCountry === data.toCountry &&
-                  t.roundNumber === data.roundNumber)
-              );
-              return [...filtered, data];
-            });
-
-            setTariffHistory(prev => [...prev, {
-              round: data.roundNumber,
-              player: data.updatedBy,
-              country: data.fromCountry,
-              tariffs: { [data.product]: data.rate },
-              submittedAt: data.updatedAt
-            }]);
-          });
-
-          newSocket.on('newMessage', (message) => {
-            setChatMessages(prev => [...prev, message]);
-          });
-
-          newSocket.on('gameDataUpdated', (data) => {
-            if (data.production) setProduction(data.production);
-            if (data.demand) setDemand(data.demand);
-            if (data.tariffRates) setTariffRates(data.tariffRates);
-          });
-
-          newSocket.on('error', (error) => {
-            console.error('Socket error:', error);
-          });
-        }
-
-      } catch (error) {
-        console.error('Error parsing user data:', error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'API request failed');
       }
-    }
 
-    return () => {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
+      return response.json();
+    }, []);
+
+
+
+
+
+// Socket connection
+const [socket, setSocket] = useState(null);
+const [isConnected, setIsConnected] = useState(false);
+
+// Initialize user from localStorage and socket connection
+useEffect(() => {
+  const token = localStorage.getItem('token');
+  const userData = localStorage.getItem('user');
+  const savedGameId = localStorage.getItem('gameId');
+  const savedCurrentRound = localStorage.getItem('currentRound');
+
+  if (token && userData) {
+    try {
+      const user = JSON.parse(userData);
+      setAuthUser(user);
+
+      // Restore game state if available
+      if (savedGameId) {
+        setGameId(savedGameId);
+        loadGameData(); // Load game data immediately when restoring state
+      }
+
+      // Initialize Socket.IO connection
+      const newSocket = io(process.env.REACT_APP_SOCKET_URL, {
+        auth: { token },
+        withCredentials: true,
+        autoConnect: true,
+        transports: ['websocket'],
+      });
+
+      newSocket.on('connect', () => {
+        console.log('✅ Connected to server:', newSocket.id);
+        setIsConnected(true);
+      });
+
+      newSocket.on('disconnect', (reason) => {
+        console.log('⚠️ Disconnected:', reason);
         setIsConnected(false);
-      }
-    };
-    // Only run once (on mount/unmount), except if socket changes (to cleanup)
-    // eslint-disable-next-line
-  }, [loadGameData]);
-  
-  // ---- Actions (Game Operator + Player) ----
+      });
+
+      newSocket.on('connect_error', (err) => {
+        console.error('❌ Connection error:', err.message);
+      });
+
+      // Handle online users updates
+      newSocket.on('onlineUsers', (users) => {
+        setOnlineUsers(users);
+      });
+
+      newSocket.on('userStatusUpdate', (update) => {
+        setOnlineUsers(prev => {
+          const filtered = prev.filter(user => user.id !== update.userId);
+          if (update.isOnline) {
+            return [...filtered, update];
+          }
+          return filtered;
+        });
+      });
+
+      // Handle game state updates
+      newSocket.on('gameStateChanged', (data) => {
+        if (data.gameId) {
+          setGameId(data.gameId);
+          localStorage.setItem('gameId', data.gameId);
+        }
+        if (data.currentRound !== undefined) {
+          setCurrentRound(data.currentRound);
+          localStorage.setItem('currentRound', data.currentRound);
+        }
+        if (data.status) setGameStatus(data.status);
+        if (data.totalRounds) setRounds(data.totalRounds);
+        if (data.isEnded !== undefined) setGameEnded(data.isEnded);
+      });
+
+      // Handle round timer updates
+      newSocket.on('roundTimerUpdated', (data) => {
+        setTimeLeft(data.timeRemaining);
+        setCurrentRound(data.currentRound);
+        localStorage.setItem('currentRound', data.currentRound);
+      });
+
+      // Handle tariff updates
+      newSocket.on('tariffUpdated', (data) => {
+        setTariffRates(prev => {
+          const filtered = prev.filter(t => 
+            !(t.product === data.product && 
+              t.fromCountry === data.fromCountry && 
+              t.toCountry === data.toCountry &&
+              t.roundNumber === data.roundNumber)
+          );
+          return [...filtered, data];
+        });
+
+        setTariffHistory(prev => [...prev, {
+          round: data.roundNumber,
+          player: data.updatedBy,
+          country: data.fromCountry,
+          tariffs: { [data.product]: data.rate },
+          submittedAt: data.updatedAt
+        }]);
+      });
+
+      // Handle chat messages
+      newSocket.on('newMessage', (message) => {
+        console.log('Received message:', message);
+        setChatMessages(prev => [...prev, message]);
+      });
+
+      // Handle errors
+      newSocket.on('error', (error) => {
+        console.error('Socket error:', error);
+      });
+
+      // Handle country-specific game data updates
+      newSocket.on('gameDataUpdated', (data) => {
+        if (data.production) setProduction(data.production);
+        if (data.demand) setDemand(data.demand);
+        if (data.tariffRates) setTariffRates(data.tariffRates);
+      });
+
+      setSocket(newSocket);
+
+      return () => {
+        newSocket.disconnect();
+      };
+    } catch (error) {
+      console.error('Error parsing user data:', error);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
+  }
+}, [loadGameData]);
 
   // Create new game (operator only)
   const createGame = async (totalRounds = 5) => {
@@ -234,6 +214,7 @@ export const GameProvider = ({ children }) => {
   // Start game (operator only)
   const startGame = async () => {
     if (!gameId) throw new Error('No game ID available');
+
     try {
       const data = await apiCall(`/game/${gameId}/start`, {
         method: 'POST'
@@ -244,6 +225,7 @@ export const GameProvider = ({ children }) => {
       setRoundsFinalized(true);
       setTimeLeft(900);
 
+      // Broadcast game state change
       if (socket) {
         socket.emit('gameStateUpdate', {
           gameId,
@@ -252,6 +234,7 @@ export const GameProvider = ({ children }) => {
           isStarted: true
         });
       }
+
       return data;
     } catch (error) {
       console.error('Start game error:', error);
@@ -262,6 +245,7 @@ export const GameProvider = ({ children }) => {
   // Start next round (operator only)
   const startNextRound = async () => {
     if (!gameId) throw new Error('No game ID available');
+
     try {
       const data = await apiCall(`/game/${gameId}/next-round`, {
         method: 'POST'
@@ -270,6 +254,7 @@ export const GameProvider = ({ children }) => {
       setCurrentRound(data.currentRound);
       setTimeLeft(900);
 
+      // Broadcast round change
       if (socket) {
         socket.emit('gameStateUpdate', {
           gameId,
@@ -277,6 +262,7 @@ export const GameProvider = ({ children }) => {
           timeRemaining: 900
         });
       }
+
       return data;
     } catch (error) {
       console.error('Start next round error:', error);
@@ -287,6 +273,7 @@ export const GameProvider = ({ children }) => {
   // End game (operator only)
   const endGame = async () => {
     if (!gameId) throw new Error('No game ID available');
+
     try {
       const data = await apiCall(`/game/${gameId}/end`, {
         method: 'POST'
@@ -295,6 +282,7 @@ export const GameProvider = ({ children }) => {
       setGameStatus('ended');
       setGameEnded(true);
 
+      // Broadcast game end
       if (socket) {
         socket.emit('gameStateUpdate', {
           gameId,
@@ -302,6 +290,7 @@ export const GameProvider = ({ children }) => {
           isEnded: true
         });
       }
+
       return data;
     } catch (error) {
       console.error('End game error:', error);
@@ -312,6 +301,7 @@ export const GameProvider = ({ children }) => {
   // Submit tariff changes (players only)
   const submitTariffs = async (tariffChanges) => {
     if (!gameId || !authUser) throw new Error('Game ID or user not available');
+
     try {
       const data = await apiCall('/game/tariffs/submit', {
         method: 'POST',
@@ -322,6 +312,7 @@ export const GameProvider = ({ children }) => {
         })
       });
 
+      // Emit tariff updates via socket
       if (socket) {
         tariffChanges.forEach(change => {
           socket.emit('tariffUpdate', {
@@ -342,9 +333,37 @@ export const GameProvider = ({ children }) => {
     }
   };
 
+
+  // Load game data
+  const loadGameData = useCallback(async () => {
+    if (!gameId) return;
+
+    try {
+      let data;
+      if (authUser?.role === 'operator') {
+        data = await apiCall(`/game/${gameId}`);
+        setProduction(data.game.production || []);
+        setDemand(data.game.demand || []);
+        setTariffRates(data.game.tariffRates || []);
+      } else {
+        data = await apiCall(`/game/${gameId}/player-data?currentRound=${currentRound}`);
+        setProduction(data.production || []);
+        setDemand(data.demand || []);
+        setTariffRates(data.tariffRates || []);
+      }
+
+         setCurrentRound(parseInt(localStorage.getItem('currentRound')) || 0);
+
+
+    } catch (error) {
+      console.error('Load game data error:', error);
+    }
+  }, [gameId, currentRound, authUser, apiCall]);
+
   // Send chat message
   const sendChatMessage = (content, messageType = 'group', recipientCountry = null) => {
     if (!socket || !gameId) return;
+
     socket.emit('sendMessage', {
       gameId,
       content,
@@ -366,10 +385,10 @@ export const GameProvider = ({ children }) => {
       localStorage.removeItem('currentRound');
       if (socket) {
         socket.disconnect();
-        setSocket(null);
-        setIsConnected(false);
       }
       setAuthUser(null);
+      setSocket(null);
+      setIsConnected(false);
       // Reset all game state
       setGameId(null);
       setCurrentRound(0);
@@ -409,10 +428,13 @@ export const GameProvider = ({ children }) => {
     // Game data
     countries,
     products,
-    production, setProduction,
-    demand, setDemand,
-    tariffRates, setTariffRates,
+    production,setProduction,
+    demand,setDemand,
+    tariffRates,setTariffRates,
     tariffHistory,
+
+
+
 
     // Chat
     chatMessages,

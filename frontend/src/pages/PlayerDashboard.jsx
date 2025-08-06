@@ -45,7 +45,7 @@ export default function PlayerDashboard() {
   const [chatType, setChatType] = useState('group');
   const [recipientCountry, setRecipientCountry] = useState('');
   const [playerTariffStatus, setPlayerTariffStatus] = useState(null);
-  // const socketIo = require('socket.io');
+  const socketIo = require('socket.io');
   // Check authentication
   useEffect(() => {
     if (!authUser) {
