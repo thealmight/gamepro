@@ -1,9 +1,9 @@
 {
   "name": "econ-empire-server",
   "version": "1.0.0",
-   "engines": {
-    "node": "18.17.1"},
-    
+  "engines": {
+    "node": "18.17.1"
+  },
   "description": "Backend server for Econ Empire multiplayer economic game",
   "main": "server.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "bcrypt": "^5.1.0",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
@@ -21,7 +21,8 @@
     "pg": "^8.11.3",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.32.1",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.7.2",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
