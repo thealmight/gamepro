@@ -1,21 +1,34 @@
-// Placeholder for random game data generation logic
 // utils/initGameData.js
-const { Production, Demand } = require('../models');
+const supabase = require('../db'); // Import your Supabase client
 
+/**
+ * Initialize production and demand values for each country for a game.
+ * @param {string} gameId - The game's UUID/ID.
+ * @param {string[]} countries - Array of country names/codes.
+ */
 async function generateInitialValues(gameId, countries) {
-  for (const country of countries) {
-    await Production.create({
-      country,
-      quantity: Math.floor(Math.random() * 100 + 50), // between 50 and 150
-      gameId
-    });
+  const prodRows = [];
+  const demRows = [];
 
-    await Demand.create({
+  for (const country of countries) {
+    prodRows.push({
       country,
-      value: Math.floor(Math.random() * 80 + 20), // between 20 and 100
-      gameId
+      quantity: Math.floor(Math.random() * 100 + 50), // 50-149
+      game_id: gameId
+    });
+    demRows.push({
+      country,
+      value: Math.floor(Math.random() * 80 + 20), // 20-99
+      game_id: gameId
     });
   }
+
+  // Insert all at once (bulk insert)
+  const { error: prodError } = await supabase.from('production').insert(prodRows);
+  const { error: demError } = await supabase.from('demand').insert(demRows);
+
+  if (prodError) console.error('Production insert error:', prodError);
+  if (demError) console.error('Demand insert error:', demError);
 }
 
 module.exports = generateInitialValues;

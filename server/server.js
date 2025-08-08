@@ -1,17 +1,19 @@
+require('dotenv').config();
 const http = require('http');
+const express = require('express');
 const socketIo = require('socket.io');
-const app = require('./app');
-const { User, ChatMessage } = require('./models');
-const jwt = require('jsonwebtoken');
 
-const PORT = process.env.PORT || 4000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-const emitGameData = require('./utils/emitGameData');
+// Shared Supabase client (from db.js)
+const supabase = require('./db');
 
-// Create HTTP server
+// Modular Socket.IO event handlers
+const chatSocket = require('./sockets/chatSocket');
+const gameSocket = require('./sockets/gameSocket');
+
+const app = express();
 const server = http.createServer(app);
 
-// Initialize Socket.IO
+// Socket.IO setup
 const io = socketIo(server, {
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -19,45 +21,51 @@ const io = socketIo(server, {
     credentials: true
   }
 });
-// server.listen(PORT, () => console.log(`Server running on ${PORT}`));
-// Socket.IO authentication middleware
+
+// ---- SOCKET.IO AUTH MIDDLEWARE ----
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
-    if (!token) {
-      return next(new Error('Authentication error: No token provided'));
-    }
+    if (!token) return next(new Error('No auth token provided'));
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findByPk(decoded.userId);
-    
-    if (!user) {
-      return next(new Error('Authentication error: User not found'));
-    }
+    // Validate with Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return next(new Error('Supabase token invalid'));
 
-    socket.userId = user.id;
-    socket.username = user.username;
-    socket.role = user.role;
-    socket.country = user.country;
-    
+    // Fetch user profile from 'users' table
+    const { data: dbUser, error: dbError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    if (dbError || !dbUser) return next(new Error('User not found in DB'));
+
+    socket.userId = dbUser.id;
+    socket.username = dbUser.username;
+    socket.role = dbUser.role;
+    socket.country = dbUser.country;
+
     next();
   } catch (error) {
-    next(new Error('Authentication error: Invalid token'));
+    next(new Error('Authentication error'));
   }
 });
 
-// Socket.IO connection handling
+// ---- PLUG IN SOCKET MODULES ----
+chatSocket(io);
+gameSocket(io);
+
+// ---- CORE CONNECTION HANDLER (user status, room mgmt) ----
 io.on('connection', async (socket) => {
   console.log(`User connected: ${socket.username} (${socket.role}) from ${socket.country || 'N/A'}`);
 
-  // Update user's socket ID and online status
   try {
-    await User.update(
-      { socketId: socket.id, isOnline: true },
-      { where: { id: socket.userId } }
-    );
+    await supabase
+      .from('users')
+      .update({ socket_id: socket.id, is_online: true })
+      .eq('id', socket.userId);
 
-    // Notify all clients about user connection
     io.emit('userStatusUpdate', {
       userId: socket.userId,
       username: socket.username,
@@ -65,89 +73,28 @@ io.on('connection', async (socket) => {
       isOnline: true
     });
 
-    // Send current online users to the newly connected user
-    const onlineUsers = await User.findAll({
-      where: { isOnline: true },
-      attributes: ['id', 'username', 'role', 'country', 'isOnline']
-    });
-    
-    socket.emit('onlineUsers', onlineUsers);
+    const { data: onlineUsers } = await supabase
+      .from('users')
+      .select('id, username, role, country, is_online')
+      .eq('is_online', true);
 
+    socket.emit('onlineUsers', onlineUsers || []);
   } catch (error) {
     console.error('Error updating user status:', error);
   }
 
-  // Join country-specific room for players
+  // Room management
   if (socket.role === 'player' && socket.country) {
     socket.join(`country_${socket.country}`);
   }
-
-  // Join operator room
   if (socket.role === 'operator') {
     socket.join('operators');
   }
 
-  // Handle chat messages
-  socket.on('sendMessage', async (data) => {
-    try {
-      const { gameId, content, messageType = 'group', recipientCountry } = data;
-
-      if (!content || content.trim().length === 0) {
-        socket.emit('error', { message: 'Message content cannot be empty' });
-        return;
-      }
-
-      // Save message to database
-     let message;
-try {
-  message = await ChatMessage.create({
-    gameId,
-    senderId: socket.userId,
-    senderCountry: socket.country,
-    messageType,
-    recipientCountry,
-    content: content.trim()
-  });
-} catch (err) {
-  console.error('DB save failed:', err);
-  socket.emit('error', { message: 'Database error' });
-  return;
-}
-
-
-      const messageData = {
-        id: message.id,
-        gameId,
-        senderCountry: socket.country,
-        messageType,
-        recipientCountry,
-        content: message.content,
-        sentAt: message.sentAt
-      };
-   console.log('Incoming chat:', data);
-      if (messageType === 'group') {
-        // Broadcast to all players and operators
-        console.log('Sending message:', messageData)
-        io.emit('newMessage', messageData);
-      } else if (messageType === 'private' && recipientCountry) {
-        // Send to specific country and sender
-        io.to(`country_${recipientCountry}`).emit('newMessage', messageData);
-        console.log('Sending message:', messageData)
-        socket.emit('newMessage', messageData); // Echo back to sender
-      }
-
-    } catch (error) {
-      console.error('Chat message error:', error);
-      socket.emit('error', { message: 'Failed to send message' });
-    }
-  });
-
-  // Handle tariff updates
+  // Tariff update example (non-chat)
   socket.on('tariffUpdate', (data) => {
     try {
       const { gameId, roundNumber, product, fromCountry, toCountry, rate } = data;
-
-      // Broadcast tariff update to operators and relevant players
       const updateData = {
         gameId,
         roundNumber,
@@ -158,100 +105,81 @@ try {
         updatedBy: socket.username,
         updatedAt: new Date()
       };
-
-      // Send to operators
       io.to('operators').emit('tariffUpdated', updateData);
-
-      // Send to affected countries
       io.to(`country_${fromCountry}`).emit('tariffUpdated', updateData);
       io.to(`country_${toCountry}`).emit('tariffUpdated', updateData);
-
     } catch (error) {
-      console.error('Tariff update error:', error);
       socket.emit('error', { message: 'Failed to update tariff' });
     }
   });
 
-  // Handle game state updates
+  // Game state update example
   socket.on('gameStateUpdate', async (data) => {
     if (socket.role !== 'operator') {
       socket.emit('error', { message: 'Only operators can update game state' });
       return;
     }
-
     try {
-      // Broadcast game state changes to all connected clients
       io.emit('gameStateChanged', {
         ...data,
         updatedBy: socket.username,
         updatedAt: new Date()
       });
-await emitGameData(io, data.gameId);
-
     } catch (error) {
-      console.error('Game state update error:', error);
       socket.emit('error', { message: 'Failed to update game state' });
     }
   });
 
-  // Handle round timer updates
+  // Round timer update example
   socket.on('roundTimerUpdate', (data) => {
     if (socket.role !== 'operator') {
       socket.emit('error', { message: 'Only operators can update round timer' });
       return;
     }
-
     try {
       const { gameId, currentRound, timeRemaining } = data;
-      
-      // Broadcast timer update to all clients
       io.emit('roundTimerUpdated', {
         gameId,
         currentRound,
         timeRemaining,
         updatedAt: new Date()
       });
-
     } catch (error) {
-      console.error('Round timer update error:', error);
       socket.emit('error', { message: 'Failed to update round timer' });
     }
   });
 
-  // Handle disconnection
+  // Disconnect handler
   socket.on('disconnect', async () => {
     console.log(`User disconnected: ${socket.username}`);
-
     try {
-      // Update user's online status
-      await User.update(
-        { isOnline: false, socketId: null },
-        { where: { id: socket.userId } }
-      );
+      await supabase
+        .from('users')
+        .update({ is_online: false, socket_id: null })
+        .eq('id', socket.userId);
 
-      // Notify all clients about user disconnection
       io.emit('userStatusUpdate', {
         userId: socket.userId,
         username: socket.username,
         country: socket.country,
         isOnline: false
       });
-
     } catch (error) {
       console.error('Error updating user status on disconnect:', error);
     }
   });
 
-  // Handle errors
+  // Error event
   socket.on('error', (error) => {
     console.error('Socket error:', error);
   });
 });
 
-// Start server
+// ---- START SERVER ----
+const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`🚀 Econ Empire server running on port ${PORT}`);
-  console.log(`📊 Database: PostgreSQL`);
+  console.log(`📊 Database: Supabase/PostgreSQL`);
   console.log(`🔌 WebSocket: Socket.IO enabled`);
   console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
 });

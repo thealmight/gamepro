@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../context/GameContext';
 import useCountdown from '../hooks/useCountdown';
-import { io } from 'socket.io-client';
 
 export default function PlayerDashboard() {
   const navigate = useNavigate();
   const {
-    socket, 
+    socket,
     isConnected,
     authUser,
     gameId,
@@ -29,10 +28,10 @@ export default function PlayerDashboard() {
     loadGameData,
     sendChatMessage,
     logout,
-    apiCall,  setProduction,
-  setDemand,
-  setTariffRates
-
+    apiCall,
+    setProduction,
+    setDemand,
+    setTariffRates
   } = useGame();
 
   const [tariffInputs, setTariffInputs] = useState({});
@@ -43,8 +42,8 @@ export default function PlayerDashboard() {
   const [chatType, setChatType] = useState('group');
   const [recipientCountry, setRecipientCountry] = useState('');
   const [playerTariffStatus, setPlayerTariffStatus] = useState(null);
-  // const socketIo = require('socket.io');
-  // Check authentication
+
+  // Authentication check & redirect
   useEffect(() => {
     if (!authUser) {
       navigate('/');
@@ -55,23 +54,24 @@ export default function PlayerDashboard() {
       return;
     }
   }, [authUser, navigate]);
-// adjust path if needed
 
-useEffect(() => {
-  socket.on('gameDataUpdated', ({ production, demand, tariffRates }) => {
-    console.log('Received game data update:', { production, demand, tariffRates });
-    // These setters come from your GameContext
-    setProduction(production);
-    setDemand(demand);
-    setTariffRates(tariffRates);
-  });
+  // Subscribe to gameDataUpdated socket event safely
+  useEffect(() => {
+    if (!socket) return;
 
-  return () => {
-    socket.off('gameDataUpdated');
-  };
-}, [setProduction, setDemand, setTariffRates]);
+    const handler = ({ production, demand, tariffRates }) => {
+      setProduction(production);
+      setDemand(demand);
+      setTariffRates(tariffRates);
+    };
 
-  // Load game data and player status
+    socket.on('gameDataUpdated', handler);
+    return () => {
+      socket.off('gameDataUpdated', handler);
+    };
+  }, [socket, setProduction, setDemand, setTariffRates]);
+
+  // Load game data and player tariff status on gameId or round change
   useEffect(() => {
     if (gameId && currentRound > 0) {
       loadGameData();
@@ -79,32 +79,30 @@ useEffect(() => {
     }
   }, [gameId, currentRound]);
 
-  // Initialize tariff inputs based on player's production
+  // Initialize tariff inputs for player's country production
   useEffect(() => {
-    
+    if (!authUser?.country) return;
+
     if (production.length > 0 && demand.length > 0) {
       const inputs = {};
-      
-      // For each product the player's country produces
+
       production.forEach(prod => {
-        // For each country that demands this product
         const demandingCountries = demand
-          .filter(d => d.product === prod.product)
+          .filter(d => d.product === prod.product && d.country !== authUser.country)
           .map(d => d.country);
-        
+
         demandingCountries.forEach(country => {
           const key = `${prod.product}-${country}`;
-          // Find existing tariff rate
-          const existingTariff = tariffRates.find(t => 
-            t.product === prod.product && 
-            t.fromCountry === authUser.country && 
+          const existingTariff = tariffRates.find(t =>
+            t.product === prod.product &&
+            t.fromCountry === authUser.country &&
             t.toCountry === country &&
             t.roundNumber === currentRound
           );
           inputs[key] = existingTariff ? existingTariff.rate.toString() : '';
         });
       });
-      
+
       setTariffInputs(inputs);
     }
   }, [production, demand, tariffRates, authUser?.country, currentRound]);
@@ -114,7 +112,6 @@ useEffect(() => {
 
   const loadPlayerTariffStatus = async () => {
     if (!gameId || currentRound === 0) return;
-    
     try {
       const data = await apiCall(`/game/${gameId}/tariffs/player-status/${currentRound}`);
       setPlayerTariffStatus(data);
@@ -130,12 +127,10 @@ useEffect(() => {
   };
 
   const handleTariffInputChange = (key, value) => {
-    // Validate input
     const numValue = parseFloat(value);
     if (value !== '' && (isNaN(numValue) || numValue < 0 || numValue > 100)) {
       return;
     }
-    
     setTariffInputs(prev => ({ ...prev, [key]: value }));
   };
 
@@ -145,7 +140,6 @@ useEffect(() => {
       return;
     }
 
-    // Prepare tariff changes
     const tariffChanges = [];
     Object.entries(tariffInputs).forEach(([key, value]) => {
       if (value !== '') {
@@ -169,20 +163,18 @@ useEffect(() => {
 
     try {
       const result = await submitTariffs(tariffChanges);
-      
-      // Check for any errors in the results
+
       const errors = result.results.filter(r => r.error);
       const successes = result.results.filter(r => r.success);
 
       if (errors.length > 0) {
         setError(`Some tariffs failed: ${errors.map(e => e.error).join(', ')}`);
       }
-      
+
       if (successes.length > 0) {
         setSuccess(`Successfully updated ${successes.length} tariff rate(s)`);
         await loadPlayerTariffStatus();
       }
-
     } catch (error) {
       setError(error.message);
     } finally {
@@ -193,24 +185,19 @@ useEffect(() => {
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
-    
+
     sendChatMessage(
-      chatInput.trim(), 
-      chatType, 
+      chatInput.trim(),
+      chatType,
       chatType === 'private' ? recipientCountry : null
     );
     setChatInput('');
   };
 
-  const getProductionForCountry = (country) => {
-    return production.filter(p => p.country === country);
-  };
+  const getProductionForCountry = (country) => production.filter(p => p.country === country);
+  const getDemandForCountry = (country) => demand.filter(d => d.country === country);
 
-  const getDemandForCountry = (country) => {
-    return demand.filter(d => d.country === country);
-  };
-
-  const playerCountry = authUser?.country;
+  const playerCountry = authUser?.country || '';
   const playerProduction = getProductionForCountry(playerCountry);
   const playerDemand = getDemandForCountry(playerCountry);
   const onlinePlayers = onlineUsers.filter(user => user.role === 'player');
@@ -286,7 +273,7 @@ useEffect(() => {
           )}
         </div>
 
-        {/* Country Assignment and Values */}
+        {/* Production and Demand */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Production */}
           <div className="bg-white p-6 rounded-lg shadow">
@@ -324,77 +311,76 @@ useEffect(() => {
         </div>
 
         {/* Tariff Management */}
-{gameStatus === 'active' && !isGameEnded && currentRound > 0 && playerProduction.length > 0 && (
-  <div className="bg-white p-6 rounded-lg shadow mb-6">
-    <h2 className="text-xl font-semibold mb-4">Manage Tariff Rates (Round {currentRound})</h2>
-    
-    {timeLeft === 0 ? (
-      <div className="p-4 bg-red-50 border border-red-200 rounded mb-4">
-        <p className="text-red-800 font-medium">
-          Time's up! Tariff submissions are closed for this round.
-        </p>
-      </div>
-    ) : (
-      <>
-        <p className="text-gray-600 mb-4">
-          Set tariff rates for products your country produces. Rates must be between 0-100%.
-        </p>
+        {gameStatus === 'active' && !isGameEnded && currentRound > 0 && playerProduction.length > 0 && (
+          <div className="bg-white p-6 rounded-lg shadow mb-6">
+            <h2 className="text-xl font-semibold mb-4">Manage Tariff Rates (Round {currentRound})</h2>
 
-        <div className="space-y-4 mb-6">
-          {playerProduction.map(prod => {
-            // Find countries that demand this product
-            const demandingCountries = demand
-              .filter(d => d.product === prod.product && d.country !== playerCountry)
-              .map(d => d.country);
+            {timeLeft === 0 ? (
+              <div className="p-4 bg-red-50 border border-red-200 rounded mb-4">
+                <p className="text-red-800 font-medium">
+                  Time's up! Tariff submissions are closed for this round.
+                </p>
+              </div>
+            ) : (
+              <>
+                <p className="text-gray-600 mb-4">
+                  Set tariff rates for products your country produces. Rates must be between 0-100%.
+                </p>
 
-            if (demandingCountries.length === 0) return null;
+                <div className="space-y-4 mb-6">
+                  {playerProduction.map(prod => {
+                    const demandingCountries = demand
+                      .filter(d => d.product === prod.product && d.country !== playerCountry)
+                      .map(d => d.country);
 
-            return (
-              <div key={prod.product} className="border rounded-lg p-4">
-                <h3 className="font-medium text-lg mb-3">{prod.product} (You produce {prod.quantity} units)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {demandingCountries.map(country => {
-                    const key = `${prod.product}-${country}`;
-                    const demandQuantity = demand.find(d => d.product === prod.product && d.country === country)?.quantity;
-                    
+                    if (demandingCountries.length === 0) return null;
+
                     return (
-                      <div key={country} className="border rounded p-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          To {country} (demands {demandQuantity} units)
-                        </label>
-                        <div className="flex items-center">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            value={tariffInputs[key] || ''}
-                            onChange={(e) => handleTariffInputChange(key, e.target.value)}
-                            className="w-full p-2 border rounded"
-                            placeholder="0-100"
-                          />
-                          <span className="ml-2 text-gray-500">%</span>
+                      <div key={prod.product} className="border rounded-lg p-4">
+                        <h3 className="font-medium text-lg mb-3">{prod.product} (You produce {prod.quantity} units)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {demandingCountries.map(country => {
+                            const key = `${prod.product}-${country}`;
+                            const demandQuantity = demand.find(d => d.product === prod.product && d.country === country)?.quantity;
+
+                            return (
+                              <div key={country} className="border rounded p-3">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  To {country} (demands {demandQuantity} units)
+                                </label>
+                                <div className="flex items-center">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    value={tariffInputs[key] || ''}
+                                    onChange={(e) => handleTariffInputChange(key, e.target.value)}
+                                    className="w-full p-2 border rounded"
+                                    placeholder="0-100"
+                                  />
+                                  <span className="ml-2 text-gray-500">%</span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            );
-          })}
-        </div>
 
-        <button
-          onClick={handleSubmitTariffs}
-          disabled={loading || timeLeft === 0}
-          className="bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? 'Submitting...' : `Submit Tariffs for Round ${currentRound}`}
-        </button>
-      </>
-    )}
-  </div>
-)}
+                <button
+                  onClick={handleSubmitTariffs}
+                  disabled={loading || timeLeft === 0}
+                  className="bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Submitting...' : `Submit Tariffs for Round ${currentRound}`}
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Current Tariff Rates */}
         {playerDemand.length > 0 && (
@@ -403,10 +389,9 @@ useEffect(() => {
             <p className="text-gray-600 mb-4">
               These are the tariff rates other countries charge for products you need.
             </p>
-            
+
             <div className="space-y-4">
               {playerDemand.map(dem => {
-                // Find countries that produce this product
                 const producingCountries = production
                   .filter(p => p.product === dem.product && p.country !== playerCountry)
                   .map(p => ({ country: p.country, quantity: p.quantity }));
@@ -420,9 +405,9 @@ useEffect(() => {
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {producingCountries.map(({ country, quantity }) => {
-                        const currentTariff = tariffRates.find(t => 
-                          t.product === dem.product && 
-                          t.fromCountry === country && 
+                        const currentTariff = tariffRates.find(t =>
+                          t.product === dem.product &&
+                          t.fromCountry === country &&
                           t.toCountry === playerCountry &&
                           t.roundNumber <= currentRound
                         );
@@ -448,14 +433,14 @@ useEffect(() => {
         {/* Chat Section */}
         <div className="bg-white p-6 rounded-lg shadow">
           <h2 className="text-xl font-semibold mb-4">Game Chat</h2>
-          
+
           {/* Chat Messages */}
           <div className="border rounded-lg mb-4 h-64 overflow-y-auto p-4 bg-gray-50">
             {chatMessages.length === 0 ? (
               <p className="text-gray-500 text-center">No messages yet...</p>
             ) : (
               chatMessages.map((message, idx) => (
-                <div key={idx} className="mb-2">
+                <div key={message.id || idx} className="mb-2">
                   <span className="font-medium text-blue-600">
                     {message.senderCountry}
                     {message.messageType === 'private' && message.recipientCountry && (

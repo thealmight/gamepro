@@ -1,278 +1,255 @@
-const { TariffRate, Production, User, Game } = require('../models');
-const { Op } = require('sequelize');
+// controllers/tariffController.js
 
-// Submit tariff changes
+const supabase = require('../db');
+const { updatePlayerRound } = require('../services/updatePlayerRound');
+
+// --- Helper: Extract custom profile from Supabase Auth token ---
+async function getSupabaseProfile(req) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return null;
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
+  const { data: profile } = await supabase.from('users').select('*').eq('id', user.id).single();
+  return profile || null;
+}
+
+// --- Submit Tariff Changes ---
 const submitTariffChanges = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+    if (!profile.country) return res.status(400).json({ error: 'Player country not assigned' });
+
     const { gameId, roundNumber, tariffChanges } = req.body;
-    const userId = req.user.userId;
-    const userCountry = req.user.country;
+    const userCountry = profile.country;
+    const userId = profile.id;
 
-    if (!userCountry) {
-      return res.status(400).json({ error: 'Player country not assigned' });
-    }
+    // Game validation
+    const { data: game, error: gameError } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (gameError || !game) return res.status(404).json({ error: 'Game not found' });
+    if (game.status !== 'active') return res.status(400).json({ error: 'Game is not active' });
+    if (roundNumber < 1) return res.status(400).json({ error: 'Tariff changes only allowed from Round 1 onwards' });
 
-    // Verify game exists and is active
-    const game = await Game.findByPk(gameId);
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
+    // Produced products lookup
+    const { data: producedProducts } = await supabase.from('production')
+      .select('product')
+      .eq('game_id', gameId)
+      .eq('country', userCountry);
+    const producedProductNames = (producedProducts || []).map(p => p.product);
 
-    if (game.status !== 'active') {
-      return res.status(400).json({ error: 'Game is not active' });
-    }
-
-    if (roundNumber < 1) {
-      return res.status(400).json({ error: 'Tariff changes only allowed from Round 1 onwards' });
-    }
-
-    // Get products that this country produces
-    const producedProducts = await Production.findAll({
-      where: { gameId, country: userCountry },
-      attributes: ['product']
-    });
-
-    const producedProductNames = producedProducts.map(p => p.product);
-
-    if (producedProductNames.length === 0) {
+    if (!producedProductNames.length) {
       return res.status(400).json({ error: 'Your country does not produce any products' });
     }
 
-    // Process each tariff change
+    // Upsert each tariff change
     const results = [];
     for (const change of tariffChanges) {
       const { product, toCountry, rate } = change;
-
-      // Validate that the player's country produces this product
       if (!producedProductNames.includes(product)) {
-        results.push({
-          product,
-          toCountry,
-          error: `Your country (${userCountry}) does not produce ${product}`
-        });
+        results.push({ product, toCountry, error: `Your country (${userCountry}) does not produce ${product}` });
         continue;
       }
-
-      // Validate rate
       if (rate < 0 || rate > 100) {
-        results.push({
-          product,
-          toCountry,
-          error: 'Tariff rate must be between 0 and 100'
-        });
+        results.push({ product, toCountry, error: 'Tariff rate must be between 0 and 100' });
         continue;
       }
-
-      // Set rate to 0 if it's the same country
       const finalRate = userCountry === toCountry ? 0 : rate;
-
       try {
-        // Update or create tariff rate
-        const [tariffRate, created] = await TariffRate.upsert({
-          gameId,
-          roundNumber,
-          product,
-          fromCountry: userCountry,
-          toCountry,
-          rate: finalRate,
-          submittedBy: userId
-        });
+        // Try update first, else insert
+        const { data: existingTariff } = await supabase
+          .from('tariff_rates')
+          .select('id')
+          .eq('game_id', gameId)
+          .eq('round_number', roundNumber)
+          .eq('product', product)
+          .eq('from_country', userCountry)
+          .eq('to_country', toCountry)
+          .maybeSingle();
 
-        results.push({
-          product,
-          toCountry,
-          rate: finalRate,
-          success: true,
-          action: created ? 'created' : 'updated'
-        });
-
+        if (existingTariff && existingTariff.id) {
+          await supabase.from('tariff_rates').update({
+            rate: finalRate,
+            submitted_by: userId,
+            submitted_at: new Date().toISOString()
+          }).eq('id', existingTariff.id);
+          results.push({ product, toCountry, rate: finalRate, success: true, action: 'updated' });
+        } else {
+          await supabase.from('tariff_rates').insert([{
+            game_id: gameId,
+            round_number: roundNumber,
+            product,
+            from_country: userCountry,
+            to_country: toCountry,
+            rate: finalRate,
+            submitted_by: userId,
+            submitted_at: new Date().toISOString()
+          }]);
+          results.push({ product, toCountry, rate: finalRate, success: true, action: 'created' });
+        }
       } catch (error) {
-        console.error('Tariff update error:', error);
-        results.push({
-          product,
-          toCountry,
-          error: 'Failed to update tariff rate'
-        });
+        results.push({ product, toCountry, error: 'Failed to update tariff rate' });
       }
     }
 
-    res.json({
-      success: true,
-      message: 'Tariff changes processed',
-      results
-    });
-
+    res.json({ success: true, message: 'Tariff changes processed', results });
   } catch (error) {
-    console.error('Submit tariff changes error:', error);
     res.status(500).json({ error: 'Failed to submit tariff changes' });
   }
 };
 
-// Get tariff rates for a specific game and round
+// --- Get Tariff Rates (with join) ---
 const getTariffRates = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId } = req.params;
     const { roundNumber, product, fromCountry, toCountry } = req.query;
 
-    const whereClause = { gameId };
-    
-    if (roundNumber) whereClause.roundNumber = roundNumber;
-    if (product) whereClause.product = product;
-    if (fromCountry) whereClause.fromCountry = fromCountry;
-    if (toCountry) whereClause.toCountry = toCountry;
+    let query = supabase.from('tariff_rates').select('*, users!tariff_rates_submitted_by_fkey(username, country)');
+    query = query.eq('game_id', gameId);
+    if (roundNumber) query = query.eq('round_number', roundNumber);
+    if (product) query = query.eq('product', product);
+    if (fromCountry) query = query.eq('from_country', fromCountry);
+    if (toCountry) query = query.eq('to_country', toCountry);
 
-    const tariffRates = await TariffRate.findAll({
-      where: whereClause,
-      include: [
-        {
-          model: User,
-          as: 'submitter',
-          attributes: ['username', 'country']
-        }
-      ],
-      order: [['roundNumber', 'DESC'], ['product', 'ASC'], ['fromCountry', 'ASC']]
-    });
+    query = query.order('round_number', { ascending: false })
+                 .order('product', { ascending: true })
+                 .order('from_country', { ascending: true });
 
-    res.json(tariffRates);
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
 
+    // Map join result
+    const result = data.map(d => ({
+      ...d,
+      submitter: d.users,
+      users: undefined
+    }));
+    res.json(result);
   } catch (error) {
-    console.error('Get tariff rates error:', error);
     res.status(500).json({ error: 'Failed to get tariff rates' });
   }
 };
 
-// Get tariff history for operator dashboard
+// --- Get Tariff History (for dashboard/operator) ---
 const getTariffHistory = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId } = req.params;
+    const { data, error } = await supabase
+      .from('tariff_rates')
+      .select('*, users!tariff_rates_submitted_by_fkey(username, country)')
+      .eq('game_id', gameId)
+      .order('round_number', { ascending: true })
+      .order('submitted_at', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
 
-    const tariffHistory = await TariffRate.findAll({
-      where: { gameId },
-      include: [
-        {
-          model: User,
-          as: 'submitter',
-          attributes: ['username', 'country']
-        }
-      ],
-      order: [['roundNumber', 'ASC'], ['submittedAt', 'ASC']]
-    });
-
-    // Group by round and country for easier display
+    // Group by round and from_country
     const groupedHistory = {};
-    
-    tariffHistory.forEach(tariff => {
-      const key = `${tariff.roundNumber}-${tariff.fromCountry}`;
+    data.forEach(tariff => {
+      const key = `${tariff.round_number}-${tariff.from_country}`;
       if (!groupedHistory[key]) {
         groupedHistory[key] = {
-          round: tariff.roundNumber,
-          country: tariff.fromCountry,
-          submitter: tariff.submitter,
+          round: tariff.round_number,
+          country: tariff.from_country,
+          submitter: tariff.users,
           tariffs: {},
-          submittedAt: tariff.submittedAt
+          submittedAt: tariff.submitted_at
         };
       }
       groupedHistory[key].tariffs[tariff.product] = {
-        toCountry: tariff.toCountry,
+        toCountry: tariff.to_country,
         rate: tariff.rate
       };
     });
-
     res.json(Object.values(groupedHistory));
-
   } catch (error) {
-    console.error('Get tariff history error:', error);
     res.status(500).json({ error: 'Failed to get tariff history' });
   }
 };
 
-// Get player's tariff submission status for current round
+// --- Get Player's Tariff Submission Status (per round) ---
 const getPlayerTariffStatus = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+    if (!profile.country) return res.status(400).json({ error: 'Player country not assigned' });
+
     const { gameId, roundNumber } = req.params;
-    const userCountry = req.user.country;
+    const { data: producedProducts } = await supabase.from('production')
+      .select('product')
+      .eq('game_id', gameId)
+      .eq('country', profile.country);
 
-    if (!userCountry) {
-      return res.status(400).json({ error: 'Player country not assigned' });
-    }
-
-    // Get products that this country produces
-    const producedProducts = await Production.findAll({
-      where: { gameId, country: userCountry },
-      attributes: ['product']
-    });
-
-    if (producedProducts.length === 0) {
+    if (!producedProducts.length) {
       return res.json({
         canSubmitTariffs: false,
         reason: 'Your country does not produce any products'
       });
     }
 
-    // Get current tariff submissions for this round
-    const currentTariffs = await TariffRate.findAll({
-      where: {
-        gameId,
-        roundNumber,
-        fromCountry: userCountry
-      }
-    });
+    const { data: currentTariffs } = await supabase.from('tariff_rates')
+      .select('*')
+      .eq('game_id', gameId)
+      .eq('round_number', roundNumber)
+      .eq('from_country', profile.country);
 
-    const submittedProducts = currentTariffs.map(t => t.product);
+    const submittedProducts = (currentTariffs || []).map(t => t.product);
     const producedProductNames = producedProducts.map(p => p.product);
 
     res.json({
       canSubmitTariffs: true,
       producedProducts: producedProductNames,
       submittedProducts,
-      currentTariffs: currentTariffs.map(t => ({
+      currentTariffs: (currentTariffs || []).map(t => ({
         product: t.product,
-        toCountry: t.toCountry,
+        toCountry: t.to_country,
         rate: t.rate,
-        submittedAt: t.submittedAt
+        submittedAt: t.submitted_at
       }))
     });
-
   } catch (error) {
-    console.error('Get player tariff status error:', error);
     res.status(500).json({ error: 'Failed to get tariff status' });
   }
 };
 
-// Get tariff matrix for a specific product (for operator view)
+// --- Get Tariff Matrix (operator view) ---
 const getTariffMatrix = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId, product } = req.params;
     const { roundNumber } = req.query;
 
-    const whereClause = { gameId, product };
-    if (roundNumber) whereClause.roundNumber = roundNumber;
+    let query = supabase.from('tariff_rates')
+      .select('*')
+      .eq('game_id', gameId)
+      .eq('product', product);
+    if (roundNumber) query = query.eq('round_number', roundNumber);
 
-    const tariffRates = await TariffRate.findAll({
-      where: whereClause,
-      order: [['roundNumber', 'DESC'], ['fromCountry', 'ASC'], ['toCountry', 'ASC']]
-    });
+    query = query.order('round_number', { ascending: false })
+                 .order('from_country', { ascending: true })
+                 .order('to_country', { ascending: true });
 
-    // Create matrix structure
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Build matrix
     const matrix = {};
-    tariffRates.forEach(tariff => {
-      if (!matrix[tariff.fromCountry]) {
-        matrix[tariff.fromCountry] = {};
-      }
-      matrix[tariff.fromCountry][tariff.toCountry] = {
+    data.forEach(tariff => {
+      if (!matrix[tariff.from_country]) matrix[tariff.from_country] = {};
+      matrix[tariff.from_country][tariff.to_country] = {
         rate: tariff.rate,
-        roundNumber: tariff.roundNumber,
-        submittedAt: tariff.submittedAt
+        roundNumber: tariff.round_number,
+        submittedAt: tariff.submitted_at
       };
     });
-
-    res.json({
-      product,
-      matrix
-    });
-
+    res.json({ product, matrix });
   } catch (error) {
-    console.error('Get tariff matrix error:', error);
     res.status(500).json({ error: 'Failed to get tariff matrix' });
   }
 };

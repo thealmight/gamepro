@@ -1,3 +1,5 @@
+// routes/submissionRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const Submission = require('../models/Submission');
@@ -14,17 +16,17 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET all submissions
+// GET all submissions (with optional query filtering)
 router.get('/', async (req, res) => {
   const { round, player, country } = req.query;
-
   const where = {};
 
   if (round) where.round = round;
   if (player) where.player = player;
   if (country) where.country = country;
+
   try {
-    const submissions = await Submission.findAll();
+    const submissions = await Submission.findAll({ where });
     res.json(submissions);
   } catch (err) {
     console.error('Error fetching submissions:', err);

@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../context/GameContext';
 import useCountdown from '../hooks/useCountdown';
-import { io } from 'socket.io-client';
 
 export default function OperatorDashboard() {
   const navigate = useNavigate();
   const {
     socket,
-     isConnected,
+    isConnected,
     authUser,
     gameId,
     rounds,
@@ -44,7 +43,7 @@ export default function OperatorDashboard() {
   const [tariffMatrix, setTariffMatrix] = useState({});
   const [chatInput, setChatInput] = useState('');
 
-  // Check authentication
+  // Redirect non-auth or non-operator users
   useEffect(() => {
     if (!authUser) {
       navigate('/');
@@ -56,14 +55,14 @@ export default function OperatorDashboard() {
     }
   }, [authUser, navigate]);
 
-  // Load game data when gameId changes
+  // Load game data on gameId or currentRound change
   useEffect(() => {
     if (gameId) {
       loadGameData();
     }
   }, [gameId, currentRound]);
 
-  // Countdown timer
+  // Countdown timer hook
   useCountdown(timeLeft, setTimeLeft, gameStatus === 'active' && !isGameEnded);
 
   const formatTime = (seconds) => {
@@ -90,7 +89,6 @@ export default function OperatorDashboard() {
       setError(`Cannot start game. Need 5 players online, currently have ${onlinePlayers}`);
       return;
     }
-
     setLoading(true);
     setError('');
     try {
@@ -129,12 +127,15 @@ export default function OperatorDashboard() {
 
   const handleResetGame = async () => {
     if (!gameId) return;
-    
     setLoading(true);
     setError('');
     try {
       await apiCall(`/game/${gameId}/reset`, { method: 'POST' });
       await loadGameData();
+      setRoundsFinalized(false);
+      setGameEnded(false);
+      setCurrentRound(0);
+      setGameStatus('waiting');
     } catch (error) {
       setError(error.message);
     } finally {
@@ -144,7 +145,6 @@ export default function OperatorDashboard() {
 
   const loadTariffMatrix = async (product) => {
     if (!gameId || !product) return;
-    
     try {
       const data = await apiCall(`/game/${gameId}/tariffs/matrix/${product}?roundNumber=${currentRound}`);
       setTariffMatrix(prev => ({ ...prev, [product]: data.matrix }));
@@ -156,7 +156,6 @@ export default function OperatorDashboard() {
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
-    
     sendChatMessage(chatInput.trim());
     setChatInput('');
   };
@@ -166,7 +165,7 @@ export default function OperatorDashboard() {
 
     const csv = [
       ['Round', 'Country', 'Player', 'Product', 'Rate', 'Submitted At'].join(','),
-      ...tariffHistory.flatMap(entry => 
+      ...tariffHistory.flatMap(entry =>
         Object.entries(entry.tariffs).map(([product, rate]) => [
           entry.round,
           entry.country,
@@ -222,8 +221,8 @@ export default function OperatorDashboard() {
                 <div
                   key={country}
                   className={`p-3 rounded-lg border-2 ${
-                    player 
-                      ? 'border-green-500 bg-green-50' 
+                    player
+                      ? 'border-green-500 bg-green-50'
                       : 'border-gray-300 bg-gray-50'
                   }`}
                 >
@@ -243,7 +242,7 @@ export default function OperatorDashboard() {
         {/* Game Controls */}
         <div className="bg-white p-6 rounded-lg shadow mb-6">
           <h2 className="text-xl font-semibold mb-4">Game Control</h2>
-          
+
           {!gameId ? (
             <div>
               <label className="block mb-2 font-medium">Set Number of Rounds</label>
@@ -436,7 +435,7 @@ export default function OperatorDashboard() {
                         <td className="px-3 py-2 font-medium">{fromCountry}</td>
                         {countries.map(toCountry => (
                           <td key={toCountry} className="px-3 py-2 text-center">
-                            {rates[toCountry] ? `${rates[toCountry].rate}%` : '-'}
+                            {rates && rates[toCountry] ? `${rates[toCountry].rate}%` : '-'}
                           </td>
                         ))}
                       </tr>
@@ -503,7 +502,7 @@ export default function OperatorDashboard() {
               <p className="text-gray-500 text-center">No messages yet...</p>
             ) : (
               chatMessages.map((message, idx) => (
-                <div key={idx} className="mb-2">
+                <div key={message.id || idx} className="mb-2">
                   <span className="font-medium text-blue-600">{message.senderCountry}:</span>
                   <span className="ml-2">{message.content}</span>
                   <span className="text-xs text-gray-500 ml-2">

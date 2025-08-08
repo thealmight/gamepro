@@ -1,336 +1,276 @@
-const { Game, GameRound, Production, Demand, TariffRate, User } = require('../models');
-const { Op } = require('sequelize');
+// controllers/gameController.js
 
-// Constants
+const supabase = require('../db');
+const { updatePlayerRound } = require('../services/updatePlayerRound');
+
 const COUNTRIES = ['USA', 'China', 'Germany', 'Japan', 'India'];
 const PRODUCTS = ['Steel', 'Grain', 'Oil', 'Electronics', 'Textiles'];
 
-// Create a new game
-const createGame = async (req, res) => {
+// --- Auth helper ---
+async function getSupabaseProfile(req) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return null;
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
+  const { data: profile } = await supabase.from('users').select('*').eq('id', user.id).single();
+  return profile || null;
+}
+
+// --- Create Game ---
+exports.createGame = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+    if (profile.role !== 'operator')
+      return res.status(403).json({ error: 'Only the operator can create games.' });
+
     const { totalRounds = 5 } = req.body;
-    const operatorId = req.user.userId;
+    const { data: game, error } = await supabase
+      .from('games')
+      .insert([{ total_rounds: totalRounds, operator_id: profile.id, status: 'waiting' }])
+      .select()
+      .single();
+    if (error || !game) throw error;
 
-    const game = await Game.create({
-      totalRounds,
-      operatorId,
-      status: 'waiting'
-    });
-
-    // Initialize game data (production, demand, initial tariffs)
     await initializeGameData(game.id);
-
     res.json({
       success: true,
       game: {
         id: game.id,
-        totalRounds: game.totalRounds,
-        currentRound: game.currentRound,
+        totalRounds: game.total_rounds,
+        currentRound: game.current_round,
         status: game.status
       }
     });
-
   } catch (error) {
     console.error('Create game error:', error);
     res.status(500).json({ error: 'Failed to create game' });
   }
 };
 
-// Initialize game data (production, demand, tariffs)
-const initializeGameData = async (gameId) => {
-  try {
-    // For each product, assign production and demand
-    for (const product of PRODUCTS) {
-      // Randomly select 2-3 countries for production
-      const shuffledCountries = [...COUNTRIES].sort(() => Math.random() - 0.5);
-      const productionCountries = shuffledCountries.slice(0, 2 + Math.floor(Math.random() * 2)); // 2-3 countries
-      const demandCountries = shuffledCountries.filter(c => !productionCountries.includes(c));
+// --- Initialize Game Data ---
+async function initializeGameData(gameId) {
+  for (const product of PRODUCTS) {
+    const shuffled = [...COUNTRIES].sort(() => Math.random() - 0.5);
+    const productionCountries = shuffled.slice(0, 2 + Math.floor(Math.random() * 2));
+    const demandCountries = shuffled.filter(c => !productionCountries.includes(c));
 
-      // Assign production values (sum = 100)
-      let remainingProduction = 100;
-      for (let i = 0; i < productionCountries.length; i++) {
-        const country = productionCountries[i];
-        let quantity;
-        
-        if (i === productionCountries.length - 1) {
-          // Last country gets remaining amount
-          quantity = remainingProduction;
-        } else {
-          // Random amount between 20-50
-          quantity = Math.max(20, Math.min(50, Math.floor(Math.random() * 31) + 20));
-          if (quantity > remainingProduction - 20) {
-            quantity = remainingProduction - 20;
-          }
-        }
-
-        await Production.create({
-          gameId,
-          country,
-          product,
-          quantity
-        });
-
-        remainingProduction -= quantity;
-      }
-
-      // Assign demand values (sum = 100)
-      let remainingDemand = 100;
-      for (let i = 0; i < demandCountries.length; i++) {
-        const country = demandCountries[i];
-        let quantity;
-        
-        if (i === demandCountries.length - 1) {
-          // Last country gets remaining amount
-          quantity = remainingDemand;
-        } else {
-          // Random amount between 15-40
-          quantity = Math.max(15, Math.min(40, Math.floor(Math.random() * 26) + 15));
-          if (quantity > remainingDemand - 15) {
-            quantity = remainingDemand - 15;
-          }
-        }
-
-        await Demand.create({
-          gameId,
-          country,
-          product,
-          quantity
-        });
-
-        remainingDemand -= quantity;
-      }
-
-      // Initialize tariff rates (0 for same country, random 0-100 for others)
-      for (const fromCountry of productionCountries) {
-        for (const toCountry of demandCountries) {
-          const rate = fromCountry === toCountry ? 0 : Math.floor(Math.random() * 101);
-          
-          await TariffRate.create({
-            gameId,
-            roundNumber: 0, // Initial round
-            product,
-            fromCountry,
-            toCountry,
-            rate
-          });
-        }
-      }
+    // --- Production (sum = 100) ---
+    let remainingProduction = 100;
+    for (let i = 0; i < productionCountries.length; i++) {
+      let quantity = (i === productionCountries.length - 1)
+        ? remainingProduction
+        : Math.max(20, Math.min(50, Math.floor(Math.random() * 31) + 20));
+      if (i !== productionCountries.length - 1 && quantity > remainingProduction - 20)
+        quantity = remainingProduction - 20;
+      await supabase.from('production').insert([{ game_id: gameId, country: productionCountries[i], product, quantity }]);
+      remainingProduction -= quantity;
     }
 
-    console.log(`Game ${gameId} initialized with production, demand, and tariff data`);
-  } catch (error) {
-    console.error('Initialize game data error:', error);
-    throw error;
+    // --- Demand (sum = 100) ---
+    let remainingDemand = 100;
+    for (let i = 0; i < demandCountries.length; i++) {
+      let quantity = (i === demandCountries.length - 1)
+        ? remainingDemand
+        : Math.max(15, Math.min(40, Math.floor(Math.random() * 26) + 15));
+      if (i !== demandCountries.length - 1 && quantity > remainingDemand - 15)
+        quantity = remainingDemand - 15;
+      await supabase.from('demand').insert([{ game_id: gameId, country: demandCountries[i], product, quantity }]);
+      remainingDemand -= quantity;
+    }
+
+    // --- Tariffs ---
+    for (const fromCountry of productionCountries) {
+      for (const toCountry of demandCountries) {
+        const rate = fromCountry === toCountry ? 0 : Math.floor(Math.random() * 101);
+        await supabase.from('tariff_rates').insert([{
+          game_id: gameId,
+          round_number: 0,
+          product,
+          from_country: fromCountry,
+          to_country: toCountry,
+          rate
+        }]);
+      }
+    }
   }
-};
+}
 
-// Start the game
-const startGame = async (req, res) => {
+// --- Start Game ---
+exports.startGame = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId } = req.params;
-    
-    const game = await Game.findByPk(gameId);
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
+    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    if (game.operator_id !== profile.id)
+      return res.status(403).json({ error: 'Only the operator can start the game' });
 
-    if (game.operatorId !== req.user.userId) {
-      return res.status(403).json({ error: 'Only the game operator can start the game' });
-    }
+    // Count online players
+    const { count: onlinePlayers } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', 'player')
+      .eq('is_online', true);
 
-    // Check if all 5 players are online
-    const onlinePlayers = await User.count({
-      where: { role: 'player', isOnline: true }
-    });
+    if (onlinePlayers < 5)
+      return res.status(400).json({ error: `Need 5 players online, currently have ${onlinePlayers}` });
 
-    if (onlinePlayers < 5) {
-      return res.status(400).json({ 
-        error: `Cannot start game. Need 5 players online, currently have ${onlinePlayers}` 
-      });
-    }
-
-    // Update game status and start first round
-    await game.update({
+    await supabase.from('games').update({
       status: 'active',
-      currentRound: 1,
-      startedAt: new Date()
-    });
+      current_round: 1,
+      started_at: new Date().toISOString()
+    }).eq('id', gameId);
 
-    // Create first round
-    await GameRound.create({
-      gameId,
-      roundNumber: 1,
-      startTime: new Date(),
+    await supabase.from('game_rounds').insert([{
+      game_id: gameId,
+      round_number: 1,
+      start_time: new Date().toISOString(),
       status: 'active'
-    });
+    }]);
 
     res.json({
       success: true,
       message: 'Game started successfully',
-      game: {
-        id: game.id,
-        currentRound: game.currentRound,
-        status: game.status
-      }
+      game: { id: game.id, currentRound: 1, status: 'active' }
     });
-
   } catch (error) {
     console.error('Start game error:', error);
     res.status(500).json({ error: 'Failed to start game' });
   }
 };
 
-// Start next round
-const startNextRound = async (req, res) => {
+// --- Start Next Round ---
+exports.startNextRound = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId } = req.params;
-    
-    const game = await Game.findByPk(gameId);
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
-
-    if (game.operatorId !== req.user.userId) {
-      return res.status(403).json({ error: 'Only the game operator can control rounds' });
-    }
-
-    if (game.currentRound >= game.totalRounds) {
+    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    if (game.operator_id !== profile.id)
+      return res.status(403).json({ error: 'Only the operator can control rounds' });
+    if (game.current_round >= game.total_rounds)
       return res.status(400).json({ error: 'Game has already ended' });
-    }
 
-    // End current round
-    await GameRound.update(
-      { status: 'completed', endTime: new Date() },
-      { where: { gameId, roundNumber: game.currentRound } }
-    );
+    await supabase.from('game_rounds').update({
+      status: 'completed',
+      end_time: new Date().toISOString()
+    }).eq('game_id', gameId).eq('round_number', game.current_round);
 
-    // Start next round
-    const nextRound = game.currentRound + 1;
-    await game.update({ currentRound: nextRound });
+    const nextRound = game.current_round + 1;
+    await supabase.from('games').update({ current_round: nextRound }).eq('id', gameId);
 
-    await GameRound.create({
-      gameId,
-      roundNumber: nextRound,
-      startTime: new Date(),
+    await supabase.from('game_rounds').insert([{
+      game_id: gameId,
+      round_number: nextRound,
+      start_time: new Date().toISOString(),
       status: 'active'
-    });
+    }]);
 
     res.json({
       success: true,
       message: `Round ${nextRound} started`,
       currentRound: nextRound
     });
-
   } catch (error) {
     console.error('Start next round error:', error);
     res.status(500).json({ error: 'Failed to start next round' });
   }
 };
 
-// End game
-const endGame = async (req, res) => {
+// --- End Game ---
+exports.endGame = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId } = req.params;
-    
-    const game = await Game.findByPk(gameId);
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
+    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    if (game.operator_id !== profile.id)
+      return res.status(403).json({ error: 'Only the operator can end the game' });
 
-    if (game.operatorId !== req.user.userId) {
-      return res.status(403).json({ error: 'Only the game operator can end the game' });
-    }
+    await supabase.from('game_rounds').update({
+      status: 'completed',
+      end_time: new Date().toISOString()
+    }).eq('game_id', gameId).eq('status', 'active');
 
-    // End current round if active
-    await GameRound.update(
-      { status: 'completed', endTime: new Date() },
-      { where: { gameId, status: 'active' } }
-    );
-
-    // End game
-    await game.update({
+    await supabase.from('games').update({
       status: 'ended',
-      endedAt: new Date()
-    });
+      ended_at: new Date().toISOString()
+    }).eq('id', gameId);
 
-    res.json({
-      success: true,
-      message: 'Game ended successfully'
-    });
-
+    res.json({ success: true, message: 'Game ended successfully' });
   } catch (error) {
     console.error('End game error:', error);
     res.status(500).json({ error: 'Failed to end game' });
   }
 };
 
-// Get game data for operator
-const getGameData = async (req, res) => {
+// --- Get Game Data for Operator ---
+exports.getGameData = async (req, res) => {
   try {
-    const { gameId } = req.params;
-    
-    const game = await Game.findByPk(gameId, {
-      include: [
-        { model: Production, as: 'production' },
-        { model: Demand, as: 'demand' },
-        { model: TariffRate, as: 'tariffRates' },
-        { model: GameRound, as: 'rounds' }
-      ]
-    });
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
+    const { gameId } = req.params;
+    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+
+    const { data: production } = await supabase.from('production').select('*').eq('game_id', gameId);
+    const { data: demand } = await supabase.from('demand').select('*').eq('game_id', gameId);
+    const { data: tariffRates } = await supabase.from('tariff_rates').select('*').eq('game_id', gameId);
+    const { data: rounds } = await supabase.from('game_rounds').select('*').eq('game_id', gameId);
 
     res.json({
       game: {
         id: game.id,
-        totalRounds: game.totalRounds,
-        currentRound: game.currentRound,
+        totalRounds: game.total_rounds,
+        currentRound: game.current_round,
         status: game.status,
-        production: game.production,
-        demand: game.demand,
-        tariffRates: game.tariffRates,
-        rounds: game.rounds
+        production,
+        demand,
+        tariffRates,
+        rounds
       }
     });
-
   } catch (error) {
     console.error('Get game data error:', error);
     res.status(500).json({ error: 'Failed to get game data' });
   }
 };
 
-// Get player-specific game data
-const getPlayerGameData = async (req, res) => {
+// --- Get Player-Specific Game Data ---
+exports.getPlayerGameData = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+    const playerCountry = profile.country;
+    if (!playerCountry) return res.status(400).json({ error: 'Player country not assigned' });
+
     const { gameId } = req.params;
-    const playerCountry = req.user.country;
 
-    if (!playerCountry) {
-      return res.status(400).json({ error: 'Player country not assigned' });
+    const { data: production } = await supabase.from('production')
+      .select('*').eq('game_id', gameId).eq('country', playerCountry);
+    const { data: demand } = await supabase.from('demand')
+      .select('*').eq('game_id', gameId).eq('country', playerCountry);
+
+    const demandedProducts = (demand || []).map(d => d.product);
+    let tariffRates = [];
+    if (demandedProducts.length) {
+      const roundLimit = req.query.currentRound || 0;
+      const { data: tariffs } = await supabase.from('tariff_rates')
+        .select('*')
+        .eq('game_id', gameId)
+        .in('product', demandedProducts)
+        .lte('round_number', roundLimit)
+        .order('round_number', { ascending: false });
+      tariffRates = tariffs || [];
     }
-
-    // Get player's production data
-    const production = await Production.findAll({
-      where: { gameId, country: playerCountry }
-    });
-
-    // Get player's demand data
-    const demand = await Demand.findAll({
-      where: { gameId, country: playerCountry }
-    });
-
-    // Get tariff rates for products the player's country demands
-    const demandedProducts = demand.map(d => d.product);
-    const tariffRates = await TariffRate.findAll({
-      where: {
-        gameId,
-        product: { [Op.in]: demandedProducts },
-        roundNumber: { [Op.lte]: req.query.currentRound || 0 }
-      },
-      order: [['roundNumber', 'DESC']]
-    });
 
     res.json({
       country: playerCountry,
@@ -338,62 +278,41 @@ const getPlayerGameData = async (req, res) => {
       demand,
       tariffRates
     });
-
   } catch (error) {
     console.error('Get player game data error:', error);
     res.status(500).json({ error: 'Failed to get player game data' });
   }
 };
 
-// Reset game (regenerate values, keep player assignments)
-const resetGame = async (req, res) => {
+// --- Reset Game ---
+exports.resetGame = async (req, res) => {
   try {
+    const profile = await getSupabaseProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
+
     const { gameId } = req.params;
-    
-    const game = await Game.findByPk(gameId);
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
+    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    if (game.operator_id !== profile.id)
+      return res.status(403).json({ error: 'Only the operator can reset the game' });
 
-    if (game.operatorId !== req.user.userId) {
-      return res.status(403).json({ error: 'Only the game operator can reset the game' });
-    }
+    await supabase.from('production').delete().eq('game_id', gameId);
+    await supabase.from('demand').delete().eq('game_id', gameId);
+    await supabase.from('tariff_rates').delete().eq('game_id', gameId);
+    await supabase.from('game_rounds').delete().eq('game_id', gameId);
 
-    // Delete existing game data
-    await Production.destroy({ where: { gameId } });
-    await Demand.destroy({ where: { gameId } });
-    await TariffRate.destroy({ where: { gameId } });
-    await GameRound.destroy({ where: { gameId } });
-
-    // Reset game state
-    await game.update({
-      currentRound: 0,
+    await supabase.from('games').update({
+      current_round: 0,
       status: 'waiting',
-      startedAt: null,
-      endedAt: null
-    });
+      started_at: null,
+      ended_at: null
+    }).eq('id', gameId);
 
-    // Reinitialize game data
     await initializeGameData(gameId);
 
-    res.json({
-      success: true,
-      message: 'Game reset successfully'
-    });
-
+    res.json({ success: true, message: 'Game reset successfully' });
   } catch (error) {
     console.error('Reset game error:', error);
     res.status(500).json({ error: 'Failed to reset game' });
   }
-};
-
-module.exports = {
-  createGame,
-  startGame,
-  startNextRound,
-  endGame,
-  getGameData,
-  getPlayerGameData,
-  resetGame,
-  initializeGameData
 };

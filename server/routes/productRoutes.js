@@ -1,7 +1,8 @@
+// routes/productRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const Product = require('../models/Product');
-
 const Submission = require('../models/Submission');
 
 // GET all products
@@ -15,7 +16,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET product usage
+// GET product usage across all submissions
 router.get('/:name/usage', async (req, res) => {
   const { name } = req.params;
 

@@ -1,19 +1,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../context/GameContext';
-import { io } from 'socket.io-client';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { socket, isConnected,setAuthUser } = useGame();
+  const { setAuthUser } = useGame();
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async (e) => {
-    e.preventDefault();
-    
+    if (e && e.preventDefault) e.preventDefault();
+
     if (!username.trim()) {
       setError('Username is required');
       return;
@@ -44,7 +44,7 @@ export default function LoginPage() {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
-      // Update the context state
+      // Update context state
       setAuthUser(data.user);
 
       // Navigate based on role
@@ -53,45 +53,49 @@ export default function LoginPage() {
       } else {
         navigate('/player');
       }
-
     } catch (error) {
-      console.error('Login error:', error);
       setError(error.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-const handleQuickLogin = (userType) => {
-  if (userType === 'operator') {
-    setUsername('pavan');
-  } else {
-    const playerNames = ['player1', 'player2', 'player3', 'player4', 'player5'];
-    const randomPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
-    setUsername(randomPlayer);
-  }
-  setPassword('');
-};
+  // Quick login with auto-submit
+  const handleQuickLogin = (userType) => {
+    let quickUsername;
+    if (userType === 'operator') {
+      quickUsername = 'pavan';
+    } else {
+      const playerNames = ['player1', 'player2', 'player3', 'player4', 'player5'];
+      quickUsername = playerNames[Math.floor(Math.random() * playerNames.length)];
+    }
 
+    setUsername(quickUsername);
+    setPassword('');
+
+    // Auto-submit after setting username/password
+    setTimeout(() => {
+      handleLogin({ preventDefault: () => {} });
+    }, 100);
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900">
       {/* Background Pattern */}
       <div className="absolute inset-0 bg-black bg-opacity-20">
-        <div className="absolute inset-0" style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-        }} />
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+          }}
+        />
       </div>
 
       <div className="relative z-10 w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold text-white mb-4">
-            Econ Empire
-          </h1>
-          <p className="text-xl text-blue-200 mb-2">
-            Strategic Economic Simulation
-          </p>
+          <h1 className="text-5xl font-bold text-white mb-4">Econ Empire</h1>
+          <p className="text-xl text-blue-200 mb-2">Strategic Economic Simulation</p>
           <p className="text-sm text-blue-300">
             Master production, demand, and tariffs in real-time multiplayer gameplay
           </p>
@@ -99,9 +103,7 @@ const handleQuickLogin = (userType) => {
 
         {/* Login Form */}
         <div className="bg-white bg-opacity-10 backdrop-blur-lg rounded-2xl shadow-2xl p-8 border border-white border-opacity-20">
-          <h2 className="text-2xl font-bold mb-6 text-center text-white">
-            Enter the Empire
-          </h2>
+          <h2 className="text-2xl font-bold mb-6 text-center text-white">Enter the Empire</h2>
 
           {error && (
             <div className="bg-red-500 bg-opacity-20 border border-red-400 text-red-100 px-4 py-3 rounded-lg mb-4">
@@ -111,9 +113,7 @@ const handleQuickLogin = (userType) => {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-blue-200 mb-2">
-                Username
-              </label>
+              <label className="block text-sm font-medium text-blue-200 mb-2">Username</label>
               <input
                 type="text"
                 value={username}
@@ -125,9 +125,7 @@ const handleQuickLogin = (userType) => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-blue-200 mb-2">
-                Password (Optional)
-              </label>
+              <label className="block text-sm font-medium text-blue-200 mb-2">Password (Optional)</label>
               <input
                 type="password"
                 value={password}
@@ -188,9 +186,7 @@ const handleQuickLogin = (userType) => {
 
         {/* Footer */}
         <div className="text-center mt-8">
-          <p className="text-sm text-blue-300">
-            Need all 5 players online to start the game
-          </p>
+          <p className="text-sm text-blue-300">Need all 5 players online to start the game</p>
         </div>
       </div>
     </div>
