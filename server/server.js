@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const emitGameData = require('./utils/emitGameData');
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -172,7 +173,7 @@ try {
   });
 
   // Handle game state updates
-  socket.on('gameStateUpdate', (data) => {
+  socket.on('gameStateUpdate', async (data) => {
     if (socket.role !== 'operator') {
       socket.emit('error', { message: 'Only operators can update game state' });
       return;
@@ -185,6 +186,7 @@ try {
         updatedBy: socket.username,
         updatedAt: new Date()
       });
+await emitGameData(io, data.gameId);
 
     } catch (error) {
       console.error('Game state update error:', error);
