@@ -2,7 +2,7 @@
   "name": "econ-empire-frontend",
   "version": "0.1.0",
   "engines": {
-    "node": "18.17.1"
+    "node": "18"
   },
   "private": true,
   "dependencies": {
