@@ -37,4 +37,4 @@ services:
 
 databases:
   - name: econ-empire-db
-    plan: starter
+    plan: standard
