@@ -16,9 +16,14 @@ const testRoundRoutes = require('./routes/testRoundRoutes');
 
 const app = express();
 
+// Compute allowed origins
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim());
+
 // ----- Middleware -----
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));

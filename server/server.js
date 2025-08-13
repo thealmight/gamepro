@@ -11,10 +11,15 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-producti
 
 const server = http.createServer(app);
 
+// Compute allowed origins for Socket.IO
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim());
+
 // Socket.IO setup
 const io = socketIo(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -162,7 +167,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Econ Empire server running on port ${PORT}`);
   console.log(`📊 Database: PostgreSQL`);
   console.log(`🔌 WebSocket: Socket.IO enabled`);
-  console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+  console.log(`🌐 CORS enabled for: ${allowedOrigins.join(', ')}`);
 });
 
 // Graceful shutdown
