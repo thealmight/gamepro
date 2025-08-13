@@ -1,25 +1,16 @@
 // services/playerService.js
-const supabase = require('../db'); // Make sure this points to your Supabase client
+const { query } = require('../db');
 
 /**
  * Update the round for a player by userId
- * @param {string} playerId - Supabase user ID (or your users table PK)
+ * @param {number} playerId - user ID
  * @param {number} newRound
  * @returns {Promise<boolean>}
  */
 async function updatePlayerRound(playerId, newRound) {
   try {
-    const { data, error } = await supabase
-      .from('users')           // Or 'players' if your table is named differently
-      .update({ round: newRound })
-      .eq('id', playerId);
-
-    if (error) {
-      console.error('Failed to update player round:', error);
-      return false;
-    }
-
-    if ((data && data.length > 0) || (data && data.count > 0)) {
+    const result = await query('UPDATE users SET round = $1 WHERE id = $2', [newRound, playerId]);
+    if (result.rowCount > 0) {
       console.log(`Updated round for player ${playerId} to ${newRound}`);
       return true;
     } else {

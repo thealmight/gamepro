@@ -1,6 +1,6 @@
 // services/insertChatMessage.js
 
-const supabase = require('../db'); // Adjust path as needed
+const { query } = require('../db');
 
 /**
  * Insert a chat message into the database.
@@ -21,22 +21,13 @@ async function insertChatMessage({
   recipient_country = null,
   content
 }) {
-  const { data, error } = await supabase
-    .from('chat_messages')
-    .insert([{
-      game_id,
-      sender_id,
-      sender_country,
-      message_type,
-      recipient_country,
-      content,
-      sent_at: new Date().toISOString()
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  const { rows } = await query(
+    `INSERT INTO chat_messages (game_id, sender_id, sender_country, message_type, recipient_country, content, sent_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     RETURNING *`,
+    [game_id, sender_id, sender_country, message_type, recipient_country, content]
+  );
+  return rows[0];
 }
 
 module.exports = insertChatMessage;

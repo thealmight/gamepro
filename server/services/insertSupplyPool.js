@@ -1,5 +1,5 @@
 // services/insertSupplyPool.js
-const supabase = require('../db');
+const { query } = require('../db');
 
 /**
  * Insert a supply pool row.
@@ -9,13 +9,11 @@ const supabase = require('../db');
  * @param {number} params.quantity
  */
 async function insertSupplyPool({ round, product, quantity }) {
-  const { data, error } = await supabase
-    .from('supply_pool')
-    .insert([{ round, product, quantity }])
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  const { rows } = await query(
+    'INSERT INTO supply_pool (round, product, quantity) VALUES ($1, $2, $3) RETURNING *',
+    [round, product, quantity]
+  );
+  return rows[0];
 }
 
 module.exports = insertSupplyPool;

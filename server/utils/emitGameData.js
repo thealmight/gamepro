@@ -1,32 +1,28 @@
 // server/utils/emitGameData.js
-const supabase = require('../db');
+const { query } = require('../db');
 
 /**
  * Emit all current game data (production, demand, tariff rates) for a given gameId via Socket.IO.
- * @param {SocketIO.Server} io - Socket.IO server instance
- * @param {string} gameId - The game's UUID/ID
+ * @param {import('socket.io').Server} io
+ * @param {string} gameId
  */
 async function emitGameData(io, gameId) {
-  // Fetch data from Supabase in parallel
-  const [prodRes, demRes, tariffRes] = await Promise.all([
-    supabase.from('production').select('*').eq('game_id', gameId),
-    supabase.from('demand').select('*').eq('game_id', gameId),
-    supabase.from('tariff_rates').select('*').eq('game_id', gameId)
-  ]);
+  try {
+    const [prodRes, demRes, tariffRes] = await Promise.all([
+      query('SELECT * FROM production WHERE game_id = $1', [gameId]),
+      query('SELECT * FROM demand WHERE game_id = $1', [gameId]),
+      query('SELECT * FROM tariff_rates WHERE game_id = $1', [gameId])
+    ]);
 
-  // Handle errors (optional)
-  if (prodRes.error || demRes.error || tariffRes.error) {
-    console.error('Error fetching game data for emit:', prodRes.error || demRes.error || tariffRes.error);
-    return;
+    io.emit('gameDataUpdated', {
+      gameId,
+      production: prodRes.rows || [],
+      demand: demRes.rows || [],
+      tariffRates: tariffRes.rows || []
+    });
+  } catch (err) {
+    console.error('Error fetching game data for emit:', err);
   }
-
-  // Emit to all clients in this game (customize the room/event as you wish)
-  io.emit('gameDataUpdated', {
-    gameId,
-    production: prodRes.data || [],
-    demand: demRes.data || [],
-    tariffRates: tariffRes.data || []
-  });
 }
 
 module.exports = emitGameData;

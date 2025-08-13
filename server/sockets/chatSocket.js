@@ -1,5 +1,5 @@
 // sockets/chatSocket.js
-const supabase = require('../db'); // Update the path if needed
+const insertChatMessage = require('../services/insertChatMessage');
 
 module.exports = function(io) {
   io.on('connection', (socket) => {
@@ -12,25 +12,14 @@ module.exports = function(io) {
           return;
         }
 
-        // Save the chat message to Supabase
-        const { data: message, error } = await supabase
-          .from('chat_messages')
-          .insert([{
-            game_id: gameId,
-            sender_id: socket.userId,
-            sender_country: socket.country,
-            message_type: messageType,
-            recipient_country: recipientCountry,
-            content: content.trim(),
-            sent_at: new Date().toISOString()
-          }])
-          .select()
-          .single();
-
-        if (error || !message) {
-          socket.emit('error', { message: 'Failed to save message' });
-          return;
-        }
+        const message = await insertChatMessage({
+          game_id: gameId,
+          sender_id: socket.userId,
+          sender_country: socket.country,
+          message_type: messageType,
+          recipient_country: recipientCountry,
+          content: content.trim(),
+        });
 
         const messageData = {
           id: message.id,

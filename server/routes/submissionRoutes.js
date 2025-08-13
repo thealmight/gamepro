@@ -2,13 +2,16 @@
 
 const express = require('express');
 const router = express.Router();
-const Submission = require('../models/Submission');
+const { query } = require('../db');
 
 // POST a new submission
 router.post('/', async (req, res) => {
   try {
     const { round, player, country, tariffs } = req.body;
-    await Submission.create({ round, player, country, tariffs });
+    await query(
+      'INSERT INTO submissions (round, player, country, tariffs) VALUES ($1, $2, $3, $4)',
+      [round, player, country, tariffs || null]
+    );
     res.status(201).json({ message: 'Submission saved' });
   } catch (err) {
     console.error('Error saving submission:', err);
@@ -19,15 +22,18 @@ router.post('/', async (req, res) => {
 // GET all submissions (with optional query filtering)
 router.get('/', async (req, res) => {
   const { round, player, country } = req.query;
-  const where = {};
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+  if (round) { conditions.push(`round = $${idx++}`); params.push(round); }
+  if (player) { conditions.push(`player = $${idx++}`); params.push(player); }
+  if (country) { conditions.push(`country = $${idx++}`); params.push(country); }
 
-  if (round) where.round = round;
-  if (player) where.player = player;
-  if (country) where.country = country;
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
-    const submissions = await Submission.findAll({ where });
-    res.json(submissions);
+    const { rows } = await query(`SELECT * FROM submissions ${where} ORDER BY round ASC`, params);
+    res.json(rows);
   } catch (err) {
     console.error('Error fetching submissions:', err);
     res.status(500).json({ error: 'Failed to fetch submissions' });

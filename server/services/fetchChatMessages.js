@@ -1,6 +1,6 @@
 // services/fetchChatMessages.js
 
-const supabase = require('../db'); // Update the path if needed
+const { query } = require('../db');
 
 /**
  * Fetch all chat messages for a specific game, ordered by sent time.
@@ -8,13 +8,11 @@ const supabase = require('../db'); // Update the path if needed
  * @returns {Promise<Array>} - Array of chat messages.
  */
 async function fetchChatMessages(gameId) {
-  const { data, error } = await supabase
-    .from('chat_messages')
-    .select('*')
-    .eq('game_id', gameId)
-    .order('sent_at', { ascending: true });
-  if (error) throw error;
-  return data;
+  const { rows } = await query(
+    'SELECT * FROM chat_messages WHERE game_id = $1 ORDER BY sent_at ASC',
+    [gameId]
+  );
+  return rows;
 }
 
 module.exports = fetchChatMessages;

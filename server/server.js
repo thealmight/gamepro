@@ -2,25 +2,31 @@ require('dotenv').config();
 const http = require('http');
 const express = require('express');
 const socketIo = require('socket.io');
-
-// Shared Supabase client (from db.js)
-const supabase = require('./db');
-
-// Modular Socket.IO event handlers
+const jwt = require('jsonwebtoken');
+const { query } = require('./db');
+const app = require('./app');
 const chatSocket = require('./sockets/chatSocket');
-const gameSocket = require('./sockets/gameSocket');
 
-const app = express();
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
 const server = http.createServer(app);
+
+// Compute allowed origins for Socket.IO
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim());
 
 // Socket.IO setup
 const io = socketIo(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
+
+// Initialize socket modules
+chatSocket(io);
 
 // ---- SOCKET.IO AUTH MIDDLEWARE ----
 io.use(async (socket, next) => {
@@ -28,18 +34,18 @@ io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('No auth token provided'));
 
-    // Validate with Supabase
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return next(new Error('Supabase token invalid'));
+    // Validate JWT
+    let payload;
+    try {
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch {
+      return next(new Error('JWT invalid'));
+    }
 
-    // Fetch user profile from 'users' table
-    const { data: dbUser, error: dbError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (dbError || !dbUser) return next(new Error('User not found in DB'));
+    // Fetch user profile from DB
+    const { rows } = await query('SELECT id, username, role, country FROM users WHERE id = $1', [payload.id]);
+    const dbUser = rows[0];
+    if (!dbUser) return next(new Error('User not found in DB'));
 
     socket.userId = dbUser.id;
     socket.username = dbUser.username;
@@ -52,38 +58,22 @@ io.use(async (socket, next) => {
   }
 });
 
-// ---- PLUG IN SOCKET MODULES ----
-chatSocket(io);
-gameSocket(io);
-
-// ---- CORE CONNECTION HANDLER (user status, room mgmt) ----
+// ---- CONNECTION HANDLER ----
 io.on('connection', async (socket) => {
   console.log(`User connected: ${socket.username} (${socket.role}) from ${socket.country || 'N/A'}`);
 
   try {
-    await supabase
-      .from('users')
-      .update({ socket_id: socket.id, is_online: true })
-      .eq('id', socket.userId);
+    await query('UPDATE users SET socket_id = $1, is_online = TRUE WHERE id = $2', [socket.id, socket.userId]);
 
-    io.emit('userStatusUpdate', {
-      userId: socket.userId,
-      username: socket.username,
-      country: socket.country,
-      isOnline: true
-    });
-
-    const { data: onlineUsers } = await supabase
-      .from('users')
-      .select('id, username, role, country, is_online')
-      .eq('is_online', true);
-
-    socket.emit('onlineUsers', onlineUsers || []);
+    const { rows: onlineUsers } = await query(
+      "SELECT id, username, role, country, is_online FROM users WHERE is_online = TRUE"
+    );
+    io.emit('onlineUsers', onlineUsers || []);
   } catch (error) {
     console.error('Error updating user status:', error);
   }
 
-  // Room management
+  // Rooms
   if (socket.role === 'player' && socket.country) {
     socket.join(`country_${socket.country}`);
   }
@@ -91,7 +81,7 @@ io.on('connection', async (socket) => {
     socket.join('operators');
   }
 
-  // Tariff update example (non-chat)
+  // Tariff update broadcast example
   socket.on('tariffUpdate', (data) => {
     try {
       const { gameId, roundNumber, product, fromCountry, toCountry, rate } = data;
@@ -153,11 +143,7 @@ io.on('connection', async (socket) => {
   socket.on('disconnect', async () => {
     console.log(`User disconnected: ${socket.username}`);
     try {
-      await supabase
-        .from('users')
-        .update({ is_online: false, socket_id: null })
-        .eq('id', socket.userId);
-
+      await query('UPDATE users SET is_online = FALSE, socket_id = NULL WHERE id = $1', [socket.userId]);
       io.emit('userStatusUpdate', {
         userId: socket.userId,
         username: socket.username,
@@ -179,9 +165,9 @@ io.on('connection', async (socket) => {
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`🚀 Econ Empire server running on port ${PORT}`);
-  console.log(`📊 Database: Supabase/PostgreSQL`);
+  console.log(`📊 Database: PostgreSQL`);
   console.log(`🔌 WebSocket: Socket.IO enabled`);
-  console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+  console.log(`🌐 CORS enabled for: ${allowedOrigins.join(', ')}`);
 });
 
 // Graceful shutdown

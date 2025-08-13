@@ -1,13 +1,9 @@
 // services/fetchProducts.js
-const supabase = require('../db');
+const { query } = require('../db');
 
 async function fetchProducts() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .order('name', { ascending: true });
-  if (error) throw error;
-  return data;
+  const { rows } = await query('SELECT * FROM products ORDER BY name ASC');
+  return rows;
 }
 
 module.exports = fetchProducts;

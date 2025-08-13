@@ -2,14 +2,13 @@
 
 const express = require('express');
 const router = express.Router();
-const Product = require('../models/Product');
-const Submission = require('../models/Submission');
+const { query } = require('../db');
 
 // GET all products
 router.get('/', async (req, res) => {
   try {
-    const products = await Product.findAll();
-    res.json(products);
+    const { rows } = await query('SELECT * FROM products ORDER BY name ASC');
+    res.json(rows);
   } catch (err) {
     console.error('Error fetching products:', err);
     res.status(500).json({ error: 'Failed to fetch products' });
@@ -21,16 +20,17 @@ router.get('/:name/usage', async (req, res) => {
   const { name } = req.params;
 
   try {
-    const submissions = await Submission.findAll();
+    const { rows } = await query('SELECT round, player, country, tariffs FROM submissions');
     const usage = [];
 
-    submissions.forEach(sub => {
-      if (sub.tariffs && sub.tariffs[name] !== undefined) {
+    rows.forEach(sub => {
+      const tariffs = sub.tariffs || {};
+      if (tariffs && tariffs[name] !== undefined) {
         usage.push({
           round: sub.round,
           player: sub.player,
           country: sub.country,
-          tariff: sub.tariffs[name]
+          tariff: tariffs[name]
         });
       }
     });

@@ -6,7 +6,6 @@ const morgan = require('morgan');
 const { router: authRoutes } = require('./routes/auth');
 const gameRoutes = require('./routes/gameRoutes');
 const userRoutes = require('./routes/userRoutes');
-const chatRoutes = require('./routes/chatRoutes');
 const tariffRoutes = require('./routes/tariffRoutes');
 const gameDataRoutes = require('./routes/gameDataRoutes');
 const playerRoutes = require('./routes/playerRoutes');
@@ -14,13 +13,17 @@ const productionRoutes = require('./routes/productionRoutes');
 const submissionRoutes = require('./routes/submissionRoutes');
 const supplyRoutes = require('./routes/supplyRoutes');
 const testRoundRoutes = require('./routes/testRoundRoutes');
-// const testRoutes = require('./routes/test'); // Uncomment if needed
 
 const app = express();
 
+// Compute allowed origins
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim());
+
 // ----- Middleware -----
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
@@ -31,7 +34,6 @@ app.use(morgan('dev'));
 app.use('/api/auth', authRoutes);
 app.use('/api/game', gameRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/chat', chatRoutes);
 app.use('/api/tariff', tariffRoutes);
 app.use('/api/players', playerRoutes);
 app.use('/api/production', productionRoutes);
@@ -39,7 +41,6 @@ app.use('/api/submissions', submissionRoutes);
 app.use('/api/supply', supplyRoutes);
 app.use('/api', gameDataRoutes);
 app.use('/api', testRoundRoutes); // Mounts at /api/test-round
-// app.use('/api', testRoutes); // Remove if not needed
 
 // ----- General Routes -----
 app.get('/', (req, res) => {

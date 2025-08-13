@@ -1,22 +1,19 @@
 // services/insertUser.js
-const supabase = require('../db');
+const { query } = require('../db');
 
 /**
  * Insert a user row.
  * @param {Object} params
- * @param {string} params.id (Supabase Auth user ID)
  * @param {string} params.username
  * @param {string} params.role
  * @param {string} [params.country]
  */
-async function insertUser({ id, username, role, country }) {
-  const { data, error } = await supabase
-    .from('users')
-    .insert([{ id, username, role, country }])
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+async function insertUser({ username, role, country }) {
+  const { rows } = await query(
+    'INSERT INTO users (username, role, country) VALUES ($1, $2, $3) RETURNING *',
+    [username, role, country || null]
+  );
+  return rows[0];
 }
 
 module.exports = insertUser;

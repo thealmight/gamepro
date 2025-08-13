@@ -1,5 +1,5 @@
 // utils/initGameData.js
-const supabase = require('../db'); // Import your Supabase client
+const { query } = require('../db');
 
 /**
  * Initialize production and demand values for each country for a game.
@@ -24,11 +24,12 @@ async function generateInitialValues(gameId, countries) {
   }
 
   // Insert all at once (bulk insert)
-  const { error: prodError } = await supabase.from('production').insert(prodRows);
-  const { error: demError } = await supabase.from('demand').insert(demRows);
-
-  if (prodError) console.error('Production insert error:', prodError);
-  if (demError) console.error('Demand insert error:', demError);
+  for (const r of prodRows) {
+    await query('INSERT INTO production (game_id, country, product, quantity) VALUES ($1, $2, $3, $4)', [r.game_id, r.country, r.product || 'Steel', r.quantity]);
+  }
+  for (const r of demRows) {
+    await query('INSERT INTO demand (game_id, country, product, quantity) VALUES ($1, $2, $3, $4)', [r.game_id, r.country, r.product || 'Steel', r.value]);
+  }
 }
 
 module.exports = generateInitialValues;
