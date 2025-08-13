@@ -1,9 +1,15 @@
 // db.js
-const { createClient } = require('@supabase/supabase-js');
+const { Pool } = require('pg');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY // Use SERVICE_ROLE_KEY only on backend!
-);
+const connectionString = process.env.DATABASE_URL;
 
-module.exports = supabase;
+const pool = new Pool({
+  connectionString,
+  ssl: connectionString && connectionString.includes('render.com') ? { rejectUnauthorized: false } : undefined,
+});
+
+async function query(text, params) {
+  return pool.query(text, params);
+}
+
+module.exports = { pool, query };

@@ -1,22 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const supabase = require('../db'); // your Supabase client
+const { query } = require('../db');
 
 // GET all unique players from 'submissions' table
 router.get('/', async (req, res) => {
   try {
-    // Fetch all unique players
-    const { data, error } = await supabase
-      .from('submissions') // or your correct table name
-      .select('player')
-      .neq('player', null)
-      .order('player', { ascending: true });
-
-    if (error) throw error;
-
-    // Get unique names
-    const playerNames = [...new Set((data || []).map(p => p.player))];
-
+    const { rows } = await query('SELECT DISTINCT player FROM submissions WHERE player IS NOT NULL ORDER BY player ASC');
+    const playerNames = rows.map(r => r.player);
     res.json(playerNames);
   } catch (err) {
     console.error('Error fetching players:', err);

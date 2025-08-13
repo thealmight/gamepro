@@ -1,5 +1,5 @@
 // services/insertDemand.js
-const supabase = require('../db');
+const { query } = require('../db');
 
 /**
  * Insert a demand row.
@@ -10,13 +10,11 @@ const supabase = require('../db');
  * @param {number} params.quantity
  */
 async function insertDemand({ game_id, country, product, quantity }) {
-  const { data, error } = await supabase
-    .from('demand')
-    .insert([{ game_id, country, product, quantity }])
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  const { rows } = await query(
+    'INSERT INTO demand (game_id, country, product, quantity) VALUES ($1, $2, $3, $4) RETURNING *',
+    [game_id, country, product, quantity]
+  );
+  return rows[0];
 }
 
 module.exports = insertDemand;

@@ -1,22 +1,11 @@
 // controllers/tariffController.js
 
-const supabase = require('../db');
-const { updatePlayerRound } = require('../services/updatePlayerRound');
-
-// --- Helper: Extract custom profile from Supabase Auth token ---
-async function getSupabaseProfile(req) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return null;
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return null;
-  const { data: profile } = await supabase.from('users').select('*').eq('id', user.id).single();
-  return profile || null;
-}
+const { query } = require('../db');
 
 // --- Submit Tariff Changes ---
 const submitTariffChanges = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
     if (!profile.country) return res.status(400).json({ error: 'Player country not assigned' });
 
@@ -25,17 +14,18 @@ const submitTariffChanges = async (req, res) => {
     const userId = profile.id;
 
     // Game validation
-    const { data: game, error: gameError } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (gameError || !game) return res.status(404).json({ error: 'Game not found' });
+    const gameRes = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const game = gameRes.rows[0];
+    if (!game) return res.status(404).json({ error: 'Game not found' });
     if (game.status !== 'active') return res.status(400).json({ error: 'Game is not active' });
     if (roundNumber < 1) return res.status(400).json({ error: 'Tariff changes only allowed from Round 1 onwards' });
 
     // Produced products lookup
-    const { data: producedProducts } = await supabase.from('production')
-      .select('product')
-      .eq('game_id', gameId)
-      .eq('country', userCountry);
-    const producedProductNames = (producedProducts || []).map(p => p.product);
+    const producedRes = await query(
+      'SELECT product FROM production WHERE game_id = $1 AND country = $2',
+      [gameId, userCountry]
+    );
+    const producedProductNames = producedRes.rows.map(r => r.product);
 
     if (!producedProductNames.length) {
       return res.status(400).json({ error: 'Your country does not produce any products' });
@@ -55,35 +45,24 @@ const submitTariffChanges = async (req, res) => {
       }
       const finalRate = userCountry === toCountry ? 0 : rate;
       try {
-        // Try update first, else insert
-        const { data: existingTariff } = await supabase
-          .from('tariff_rates')
-          .select('id')
-          .eq('game_id', gameId)
-          .eq('round_number', roundNumber)
-          .eq('product', product)
-          .eq('from_country', userCountry)
-          .eq('to_country', toCountry)
-          .maybeSingle();
+        const existing = await query(
+          `SELECT id FROM tariff_rates
+           WHERE game_id = $1 AND round_number = $2 AND product = $3 AND from_country = $4 AND to_country = $5`,
+          [gameId, roundNumber, product, userCountry, toCountry]
+        );
 
-        if (existingTariff && existingTariff.id) {
-          await supabase.from('tariff_rates').update({
-            rate: finalRate,
-            submitted_by: userId,
-            submitted_at: new Date().toISOString()
-          }).eq('id', existingTariff.id);
+        if (existing.rows[0]) {
+          await query(
+            'UPDATE tariff_rates SET rate = $1, submitted_by = $2, submitted_at = NOW() WHERE id = $3',
+            [finalRate, userId, existing.rows[0].id]
+          );
           results.push({ product, toCountry, rate: finalRate, success: true, action: 'updated' });
         } else {
-          await supabase.from('tariff_rates').insert([{
-            game_id: gameId,
-            round_number: roundNumber,
-            product,
-            from_country: userCountry,
-            to_country: toCountry,
-            rate: finalRate,
-            submitted_by: userId,
-            submitted_at: new Date().toISOString()
-          }]);
+          await query(
+            `INSERT INTO tariff_rates (game_id, round_number, product, from_country, to_country, rate, submitted_by, submitted_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+            [gameId, roundNumber, product, userCountry, toCountry, finalRate, userId]
+          );
           results.push({ product, toCountry, rate: finalRate, success: true, action: 'created' });
         }
       } catch (error) {
@@ -97,34 +76,35 @@ const submitTariffChanges = async (req, res) => {
   }
 };
 
-// --- Get Tariff Rates (with join) ---
+// --- Get Tariff Rates (with submitter info) ---
 const getTariffRates = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
     const { roundNumber, product, fromCountry, toCountry } = req.query;
 
-    let query = supabase.from('tariff_rates').select('*, users!tariff_rates_submitted_by_fkey(username, country)');
-    query = query.eq('game_id', gameId);
-    if (roundNumber) query = query.eq('round_number', roundNumber);
-    if (product) query = query.eq('product', product);
-    if (fromCountry) query = query.eq('from_country', fromCountry);
-    if (toCountry) query = query.eq('to_country', toCountry);
+    const filters = ['game_id = $1'];
+    const params = [gameId];
+    let idx = 2;
+    if (roundNumber) { filters.push('round_number = $' + idx); params.push(roundNumber); idx++; }
+    if (product) { filters.push('product = $' + idx); params.push(product); idx++; }
+    if (fromCountry) { filters.push('from_country = $' + idx); params.push(fromCountry); idx++; }
+    if (toCountry) { filters.push('to_country = $' + idx); params.push(toCountry); idx++; }
 
-    query = query.order('round_number', { ascending: false })
-                 .order('product', { ascending: true })
-                 .order('from_country', { ascending: true });
+    const sql = `SELECT tr.*, u.username AS submitter_username, u.country AS submitter_country
+                 FROM tariff_rates tr
+                 LEFT JOIN users u ON u.id = tr.submitted_by
+                 WHERE ${filters.join(' AND ')}
+                 ORDER BY tr.round_number DESC, tr.product ASC, tr.from_country ASC`;
+    const { rows } = await query(sql, params);
 
-    const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
-
-    // Map join result
-    const result = data.map(d => ({
+    const result = rows.map(d => ({
       ...d,
-      submitter: d.users,
-      users: undefined
+      submitter: { username: d.submitter_username, country: d.submitter_country },
+      submitter_username: undefined,
+      submitter_country: undefined
     }));
     res.json(result);
   } catch (error) {
@@ -132,30 +112,30 @@ const getTariffRates = async (req, res) => {
   }
 };
 
-// --- Get Tariff History (for dashboard/operator) ---
+// --- Get Tariff History ---
 const getTariffHistory = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
-    const { data, error } = await supabase
-      .from('tariff_rates')
-      .select('*, users!tariff_rates_submitted_by_fkey(username, country)')
-      .eq('game_id', gameId)
-      .order('round_number', { ascending: true })
-      .order('submitted_at', { ascending: true });
-    if (error) return res.status(500).json({ error: error.message });
+    const { rows } = await query(
+      `SELECT tr.*, u.username AS submitter_username, u.country AS submitter_country
+       FROM tariff_rates tr
+       LEFT JOIN users u ON u.id = tr.submitted_by
+       WHERE tr.game_id = $1
+       ORDER BY tr.round_number ASC, tr.submitted_at ASC`,
+      [gameId]
+    );
 
-    // Group by round and from_country
     const groupedHistory = {};
-    data.forEach(tariff => {
+    rows.forEach(tariff => {
       const key = `${tariff.round_number}-${tariff.from_country}`;
       if (!groupedHistory[key]) {
         groupedHistory[key] = {
           round: tariff.round_number,
           country: tariff.from_country,
-          submitter: tariff.users,
+          submitter: { username: tariff.submitter_username, country: tariff.submitter_country },
           tariffs: {},
           submittedAt: tariff.submitted_at
         };
@@ -174,37 +154,36 @@ const getTariffHistory = async (req, res) => {
 // --- Get Player's Tariff Submission Status (per round) ---
 const getPlayerTariffStatus = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
     if (!profile.country) return res.status(400).json({ error: 'Player country not assigned' });
 
     const { gameId, roundNumber } = req.params;
-    const { data: producedProducts } = await supabase.from('production')
-      .select('product')
-      .eq('game_id', gameId)
-      .eq('country', profile.country);
+    const produced = await query(
+      'SELECT product FROM production WHERE game_id = $1 AND country = $2',
+      [gameId, profile.country]
+    );
 
-    if (!producedProducts.length) {
+    if (!produced.rows.length) {
       return res.json({
         canSubmitTariffs: false,
         reason: 'Your country does not produce any products'
       });
     }
 
-    const { data: currentTariffs } = await supabase.from('tariff_rates')
-      .select('*')
-      .eq('game_id', gameId)
-      .eq('round_number', roundNumber)
-      .eq('from_country', profile.country);
+    const currentTariffs = await query(
+      'SELECT * FROM tariff_rates WHERE game_id = $1 AND round_number = $2 AND from_country = $3',
+      [gameId, roundNumber, profile.country]
+    );
 
-    const submittedProducts = (currentTariffs || []).map(t => t.product);
-    const producedProductNames = producedProducts.map(p => p.product);
+    const submittedProducts = currentTariffs.rows.map(t => t.product);
+    const producedProductNames = produced.rows.map(p => p.product);
 
     res.json({
       canSubmitTariffs: true,
       producedProducts: producedProductNames,
       submittedProducts,
-      currentTariffs: (currentTariffs || []).map(t => ({
+      currentTariffs: currentTariffs.rows.map(t => ({
         product: t.product,
         toCountry: t.to_country,
         rate: t.rate,
@@ -219,28 +198,23 @@ const getPlayerTariffStatus = async (req, res) => {
 // --- Get Tariff Matrix (operator view) ---
 const getTariffMatrix = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId, product } = req.params;
     const { roundNumber } = req.query;
 
-    let query = supabase.from('tariff_rates')
-      .select('*')
-      .eq('game_id', gameId)
-      .eq('product', product);
-    if (roundNumber) query = query.eq('round_number', roundNumber);
+    const filters = ['game_id = $1', 'product = $2'];
+    const params = [gameId, product];
+    let idx = 3;
+    if (roundNumber) { filters.push('round_number = $' + idx); params.push(roundNumber); idx++; }
 
-    query = query.order('round_number', { ascending: false })
-                 .order('from_country', { ascending: true })
-                 .order('to_country', { ascending: true });
+    const sql = `SELECT * FROM tariff_rates WHERE ${filters.join(' AND ')}
+                 ORDER BY round_number DESC, from_country ASC, to_country ASC`;
+    const { rows } = await query(sql, params);
 
-    const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
-
-    // Build matrix
     const matrix = {};
-    data.forEach(tariff => {
+    rows.forEach(tariff => {
       if (!matrix[tariff.from_country]) matrix[tariff.from_country] = {};
       matrix[tariff.from_country][tariff.to_country] = {
         rate: tariff.rate,

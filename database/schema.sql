@@ -1,6 +1,9 @@
 -- Econ Empire Database Schema
 -- PostgreSQL Database Schema for the multiplayer economic game
 
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Drop existing tables if they exist (for development)
 DROP TABLE IF EXISTS chat_messages CASCADE;
 DROP TABLE IF EXISTS tariff_rates CASCADE;
@@ -8,6 +11,9 @@ DROP TABLE IF EXISTS demand CASCADE;
 DROP TABLE IF EXISTS production CASCADE;
 DROP TABLE IF EXISTS game_rounds CASCADE;
 DROP TABLE IF EXISTS games CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
+DROP TABLE IF EXISTS submissions CASCADE;
+DROP TABLE IF EXISTS supply_pool CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
 -- Users table for authentication and role management
@@ -17,6 +23,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255),
     role VARCHAR(20) NOT NULL CHECK (role IN ('operator', 'player')),
     country VARCHAR(50),
+    round INTEGER DEFAULT 0,
     socket_id VARCHAR(100),
     is_online BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -46,6 +53,12 @@ CREATE TABLE game_rounds (
     time_remaining INTEGER DEFAULT 900,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'completed')),
     UNIQUE(game_id, round_number)
+);
+
+-- Products table (static list)
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL
 );
 
 -- Production table - defines what each country produces
@@ -94,6 +107,24 @@ CREATE TABLE chat_messages (
     recipient_country VARCHAR(50), -- NULL for group messages
     content TEXT NOT NULL,
     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Submissions table (for recording generic submissions with tariffs JSON)
+CREATE TABLE submissions (
+    id SERIAL PRIMARY KEY,
+    round INTEGER NOT NULL,
+    player VARCHAR(100) NOT NULL,
+    country VARCHAR(50) NOT NULL,
+    tariffs JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Supply pool table (optional)
+CREATE TABLE supply_pool (
+    id SERIAL PRIMARY KEY,
+    round INTEGER NOT NULL,
+    product VARCHAR(50) NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity >= 0)
 );
 
 -- Create indexes for better performance

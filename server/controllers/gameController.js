@@ -1,36 +1,25 @@
 // controllers/gameController.js
 
-const supabase = require('../db');
-const { updatePlayerRound } = require('../services/updatePlayerRound');
+const { query } = require('../db');
 
 const COUNTRIES = ['USA', 'China', 'Germany', 'Japan', 'India'];
 const PRODUCTS = ['Steel', 'Grain', 'Oil', 'Electronics', 'Textiles'];
 
-// --- Auth helper ---
-async function getSupabaseProfile(req) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return null;
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return null;
-  const { data: profile } = await supabase.from('users').select('*').eq('id', user.id).single();
-  return profile || null;
-}
-
 // --- Create Game ---
 exports.createGame = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
     if (profile.role !== 'operator')
       return res.status(403).json({ error: 'Only the operator can create games.' });
 
     const { totalRounds = 5 } = req.body;
-    const { data: game, error } = await supabase
-      .from('games')
-      .insert([{ total_rounds: totalRounds, operator_id: profile.id, status: 'waiting' }])
-      .select()
-      .single();
-    if (error || !game) throw error;
+
+    const insertGame = await query(
+      'INSERT INTO games (total_rounds, operator_id, status) VALUES ($1, $2, $3) RETURNING *',
+      [totalRounds, profile.id, 'waiting']
+    );
+    const game = insertGame.rows[0];
 
     await initializeGameData(game.id);
     res.json({
@@ -63,7 +52,10 @@ async function initializeGameData(gameId) {
         : Math.max(20, Math.min(50, Math.floor(Math.random() * 31) + 20));
       if (i !== productionCountries.length - 1 && quantity > remainingProduction - 20)
         quantity = remainingProduction - 20;
-      await supabase.from('production').insert([{ game_id: gameId, country: productionCountries[i], product, quantity }]);
+      await query(
+        'INSERT INTO production (game_id, country, product, quantity) VALUES ($1, $2, $3, $4)',
+        [gameId, productionCountries[i], product, quantity]
+      );
       remainingProduction -= quantity;
     }
 
@@ -75,7 +67,10 @@ async function initializeGameData(gameId) {
         : Math.max(15, Math.min(40, Math.floor(Math.random() * 26) + 15));
       if (i !== demandCountries.length - 1 && quantity > remainingDemand - 15)
         quantity = remainingDemand - 15;
-      await supabase.from('demand').insert([{ game_id: gameId, country: demandCountries[i], product, quantity }]);
+      await query(
+        'INSERT INTO demand (game_id, country, product, quantity) VALUES ($1, $2, $3, $4)',
+        [gameId, demandCountries[i], product, quantity]
+      );
       remainingDemand -= quantity;
     }
 
@@ -83,14 +78,10 @@ async function initializeGameData(gameId) {
     for (const fromCountry of productionCountries) {
       for (const toCountry of demandCountries) {
         const rate = fromCountry === toCountry ? 0 : Math.floor(Math.random() * 101);
-        await supabase.from('tariff_rates').insert([{
-          game_id: gameId,
-          round_number: 0,
-          product,
-          from_country: fromCountry,
-          to_country: toCountry,
-          rate
-        }]);
+        await query(
+          'INSERT INTO tariff_rates (game_id, round_number, product, from_country, to_country, rate) VALUES ($1, $2, $3, $4, $5, $6)',
+          [gameId, 0, product, fromCountry, toCountry, rate]
+        );
       }
     }
   }
@@ -99,37 +90,23 @@ async function initializeGameData(gameId) {
 // --- Start Game ---
 exports.startGame = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
-    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    const gameRes = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const game = gameRes.rows[0];
+    if (!game) return res.status(404).json({ error: 'Game not found' });
     if (game.operator_id !== profile.id)
       return res.status(403).json({ error: 'Only the operator can start the game' });
 
-    // Count online players
-    const { count: onlinePlayers } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'player')
-      .eq('is_online', true);
-
+    const countRes = await query("SELECT COUNT(*)::int AS cnt FROM users WHERE role = 'player' AND is_online = TRUE");
+    const onlinePlayers = countRes.rows[0]?.cnt || 0;
     if (onlinePlayers < 5)
       return res.status(400).json({ error: `Need 5 players online, currently have ${onlinePlayers}` });
 
-    await supabase.from('games').update({
-      status: 'active',
-      current_round: 1,
-      started_at: new Date().toISOString()
-    }).eq('id', gameId);
-
-    await supabase.from('game_rounds').insert([{
-      game_id: gameId,
-      round_number: 1,
-      start_time: new Date().toISOString(),
-      status: 'active'
-    }]);
+    await query('UPDATE games SET status = $1, current_round = 1, started_at = NOW() WHERE id = $2', ['active', gameId]);
+    await query('INSERT INTO game_rounds (game_id, round_number, start_time, status) VALUES ($1, 1, NOW(), $2)', [gameId, 'active']);
 
     res.json({
       success: true,
@@ -145,31 +122,24 @@ exports.startGame = async (req, res) => {
 // --- Start Next Round ---
 exports.startNextRound = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
-    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    const gameRes = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const game = gameRes.rows[0];
+    if (!game) return res.status(404).json({ error: 'Game not found' });
     if (game.operator_id !== profile.id)
       return res.status(403).json({ error: 'Only the operator can control rounds' });
     if (game.current_round >= game.total_rounds)
       return res.status(400).json({ error: 'Game has already ended' });
 
-    await supabase.from('game_rounds').update({
-      status: 'completed',
-      end_time: new Date().toISOString()
-    }).eq('game_id', gameId).eq('round_number', game.current_round);
+    await query('UPDATE game_rounds SET status = $1, end_time = NOW() WHERE game_id = $2 AND round_number = $3', ['completed', gameId, game.current_round]);
 
     const nextRound = game.current_round + 1;
-    await supabase.from('games').update({ current_round: nextRound }).eq('id', gameId);
+    await query('UPDATE games SET current_round = $1 WHERE id = $2', [nextRound, gameId]);
 
-    await supabase.from('game_rounds').insert([{
-      game_id: gameId,
-      round_number: nextRound,
-      start_time: new Date().toISOString(),
-      status: 'active'
-    }]);
+    await query('INSERT INTO game_rounds (game_id, round_number, start_time, status) VALUES ($1, $2, NOW(), $3)', [gameId, nextRound, 'active']);
 
     res.json({
       success: true,
@@ -185,24 +155,18 @@ exports.startNextRound = async (req, res) => {
 // --- End Game ---
 exports.endGame = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
-    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    const gameRes = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const game = gameRes.rows[0];
+    if (!game) return res.status(404).json({ error: 'Game not found' });
     if (game.operator_id !== profile.id)
       return res.status(403).json({ error: 'Only the operator can end the game' });
 
-    await supabase.from('game_rounds').update({
-      status: 'completed',
-      end_time: new Date().toISOString()
-    }).eq('game_id', gameId).eq('status', 'active');
-
-    await supabase.from('games').update({
-      status: 'ended',
-      ended_at: new Date().toISOString()
-    }).eq('id', gameId);
+    await query('UPDATE game_rounds SET status = $1, end_time = NOW() WHERE game_id = $2 AND status = $3', ['completed', gameId, 'active']);
+    await query('UPDATE games SET status = $1, ended_at = NOW() WHERE id = $2', ['ended', gameId]);
 
     res.json({ success: true, message: 'Game ended successfully' });
   } catch (error) {
@@ -214,17 +178,18 @@ exports.endGame = async (req, res) => {
 // --- Get Game Data for Operator ---
 exports.getGameData = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
-    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    const gameRes = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const game = gameRes.rows[0];
+    if (!game) return res.status(404).json({ error: 'Game not found' });
 
-    const { data: production } = await supabase.from('production').select('*').eq('game_id', gameId);
-    const { data: demand } = await supabase.from('demand').select('*').eq('game_id', gameId);
-    const { data: tariffRates } = await supabase.from('tariff_rates').select('*').eq('game_id', gameId);
-    const { data: rounds } = await supabase.from('game_rounds').select('*').eq('game_id', gameId);
+    const production = (await query('SELECT * FROM production WHERE game_id = $1', [gameId])).rows;
+    const demand = (await query('SELECT * FROM demand WHERE game_id = $1', [gameId])).rows;
+    const tariffRates = (await query('SELECT * FROM tariff_rates WHERE game_id = $1', [gameId])).rows;
+    const rounds = (await query('SELECT * FROM game_rounds WHERE game_id = $1', [gameId])).rows;
 
     res.json({
       game: {
@@ -247,29 +212,29 @@ exports.getGameData = async (req, res) => {
 // --- Get Player-Specific Game Data ---
 exports.getPlayerGameData = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
     const playerCountry = profile.country;
     if (!playerCountry) return res.status(400).json({ error: 'Player country not assigned' });
 
     const { gameId } = req.params;
 
-    const { data: production } = await supabase.from('production')
-      .select('*').eq('game_id', gameId).eq('country', playerCountry);
-    const { data: demand } = await supabase.from('demand')
-      .select('*').eq('game_id', gameId).eq('country', playerCountry);
+    const production = (await query('SELECT * FROM production WHERE game_id = $1 AND country = $2', [gameId, playerCountry])).rows;
+    const demand = (await query('SELECT * FROM demand WHERE game_id = $1 AND country = $2', [gameId, playerCountry])).rows;
 
     const demandedProducts = (demand || []).map(d => d.product);
     let tariffRates = [];
     if (demandedProducts.length) {
       const roundLimit = req.query.currentRound || 0;
-      const { data: tariffs } = await supabase.from('tariff_rates')
-        .select('*')
-        .eq('game_id', gameId)
-        .in('product', demandedProducts)
-        .lte('round_number', roundLimit)
-        .order('round_number', { ascending: false });
-      tariffRates = tariffs || [];
+      const placeholders = demandedProducts.map((_, i) => `$${i + 3}`).join(',');
+      const params = [gameId, roundLimit, ...demandedProducts];
+      const tariffs = await query(
+        `SELECT * FROM tariff_rates
+         WHERE game_id = $1 AND round_number <= $2 AND product IN (${placeholders})
+         ORDER BY round_number DESC`,
+        params
+      );
+      tariffRates = tariffs.rows || [];
     }
 
     res.json({
@@ -287,26 +252,22 @@ exports.getPlayerGameData = async (req, res) => {
 // --- Reset Game ---
 exports.resetGame = async (req, res) => {
   try {
-    const profile = await getSupabaseProfile(req);
+    const profile = req.user;
     if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { gameId } = req.params;
-    const { data: game, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error || !game) return res.status(404).json({ error: 'Game not found' });
+    const gameRes = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const game = gameRes.rows[0];
+    if (!game) return res.status(404).json({ error: 'Game not found' });
     if (game.operator_id !== profile.id)
       return res.status(403).json({ error: 'Only the operator can reset the game' });
 
-    await supabase.from('production').delete().eq('game_id', gameId);
-    await supabase.from('demand').delete().eq('game_id', gameId);
-    await supabase.from('tariff_rates').delete().eq('game_id', gameId);
-    await supabase.from('game_rounds').delete().eq('game_id', gameId);
+    await query('DELETE FROM production WHERE game_id = $1', [gameId]);
+    await query('DELETE FROM demand WHERE game_id = $1', [gameId]);
+    await query('DELETE FROM tariff_rates WHERE game_id = $1', [gameId]);
+    await query('DELETE FROM game_rounds WHERE game_id = $1', [gameId]);
 
-    await supabase.from('games').update({
-      current_round: 0,
-      status: 'waiting',
-      started_at: null,
-      ended_at: null
-    }).eq('id', gameId);
+    await query('UPDATE games SET current_round = 0, status = $1, started_at = NULL, ended_at = NULL WHERE id = $2', ['waiting', gameId]);
 
     await initializeGameData(gameId);
 

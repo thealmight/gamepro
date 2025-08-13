@@ -1,5 +1,5 @@
 // services/insertTariffRate.js
-const supabase = require('../db');
+const { query } = require('../db');
 
 /**
  * Insert a tariff rate row.
@@ -15,22 +15,12 @@ const supabase = require('../db');
 async function insertTariffRate({
   game_id, round_number, product, from_country, to_country, rate, submitted_by
 }) {
-  const { data, error } = await supabase
-    .from('tariff_rates')
-    .insert([{
-      game_id,
-      round_number,
-      product,
-      from_country,
-      to_country,
-      rate,
-      submitted_by,
-      submitted_at: new Date().toISOString()
-    }])
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  const { rows } = await query(
+    `INSERT INTO tariff_rates (game_id, round_number, product, from_country, to_country, rate, submitted_by, submitted_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING *`,
+    [game_id, round_number, product, from_country, to_country, rate, submitted_by]
+  );
+  return rows[0];
 }
 
 module.exports = insertTariffRate;

@@ -3,12 +3,10 @@
 const insertChatMessage = require('../services/insertChatMessage');
 const fetchChatMessages = require('../services/fetchChatMessages');
 const { updatePlayerRound } = require('../services/updatePlayerRound');
-const supabase = require('../db'); // adjust the path as needed
 
 // POST /api/chat/message
 exports.sendMessage = async (req, res) => {
   try {
-    // Auth: Extract sender info from JWT middleware
     const sender_id = req.user.id;
     const sender_country = req.user.country;
 
@@ -26,11 +24,6 @@ exports.sendMessage = async (req, res) => {
       recipient_country,
       content
     });
-
-    // Example: Optionally update player round when they send a message
-    // if (req.body.nextRound) {
-    //   await updatePlayerRound(sender_id, req.body.nextRound);
-    // }
 
     res.json(data);
   } catch (error) {
